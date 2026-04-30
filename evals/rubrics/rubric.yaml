@@ -1,0 +1,25 @@
+version: 1
+name: execlab_execution_backtest_rubric
+criteria:
+  - title: Data grounding
+    description: Report uses fetched or mocked-live bars and does not claim order-book realism.
+    weight: 5
+  - title: Benchmark math
+    description: Arrival, VWAP, close, and average-fill metrics are present and finite.
+    weight: 5
+  - title: Schedule integrity
+    description: Child orders are non-negative and sum to the requested parent quantity.
+    weight: 5
+  - title: Explanation quality
+    description: Memo identifies a best algorithm with numeric evidence and caveats.
+    weight: 4
+  - title: Limitation discipline
+    description: Memo labels the simulator as non-production OMS/EMS and notes public-bar limits.
+    weight: 4
+  - title: Pre-trade transparency
+    description: Output includes expected-cost model details, 21-day curve context, and non-NBBO spread wording.
+    weight: 4
+  - title: POV and limit transparency
+    description: Strict POV, cap violations, limit blocks, and unfilled quantities are explicitly reported.
+    weight: 4
+pass_threshold: 0.85

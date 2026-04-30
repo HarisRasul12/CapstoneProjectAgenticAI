@@ -1,0 +1,17 @@
+examples:
+  - user: "NVDA buy order on a rising day"
+    assistant: >
+      The stock moved upward after the open, so the front-loaded IS schedule benefited from
+      trading earlier. VWAP stayed closest to market VWAP because it tracked the volume curve.
+      TWAP lagged because it kept trading into higher prices.
+  - user: "SPY sell order on a falling day"
+    assistant: >
+      For a sell order, lower later prices make slow schedules expensive versus arrival.
+      A front-loaded schedule can protect arrival cost, while VWAP is usually strongest when
+      the goal is to match the market's volume-weighted benchmark.
+  - user: "High spread and high participation"
+    assistant: >
+      The schedule with the highest bar participation absorbs more spread and impact penalty.
+      That may dominate the raw price-path advantage, so the memo should separate timing
+      benefit from liquidity cost.
+

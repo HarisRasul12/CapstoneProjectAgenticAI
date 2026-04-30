@@ -1,0 +1,43 @@
+[project]
+name = "execlab-ai"
+version = "0.1.0"
+description = "ExecLab AI multi-agent execution backtesting lab"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "streamlit>=1.44.0",
+  "pandas>=2.2.0",
+  "numpy>=1.26.0,<3",
+  "plotly>=5.24.0",
+  "pydantic>=2.8.0",
+  "yfinance>=0.2.50",
+  "google-adk>=0.3.0",
+  "google-genai>=1.16.0",
+  "pytest>=8.3.0",
+  "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.8.0",
+]
+
+[project.scripts]
+serve = "execlab.devtools:serve_main"
+test = "execlab.devtools:test_main"
+smoke = "execlab.devtools:smoke_main"
+evals = "evals.run_evals:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/execlab", "evals"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+

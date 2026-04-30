@@ -1,0 +1,36 @@
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${_IMAGE_TAG}"
+      - "."
+
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${_IMAGE_TAG}"
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "${_SERVICE}"
+      - "--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${_IMAGE_TAG}"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--timeout=900"
+      - "--cpu=2"
+      - "--memory=2Gi"
+      - "--set-env-vars=^:^GOOGLE_GENAI_USE_VERTEXAI=true:GOOGLE_CLOUD_PROJECT=$PROJECT_ID:GCLOUD_PROJECT=$PROJECT_ID:GOOGLE_CLOUD_LOCATION=${_REGION}:VERTEX_MODEL=gemini-2.5-flash-lite:EXECLAB_REQUIRE_ADK_SUCCESS=true:EXECLAB_ALLOW_TRANSIENT_FALLBACK=true:EXECLAB_APP_NAME=execlab-ai:EXECLAB_DATA_PROVIDER=yfinance:EXECLAB_DEFAULT_INTERVAL=5m:EXECLAB_CURVE_LOOKBACK_DAYS=21:EXECLAB_PRETRADE_LOOKBACK_SESSIONS=21:EXECLAB_BETA_LOOKBACK_DAYS=126"
+
+substitutions:
+  _SERVICE: "execlab-ai"
+  _REGION: "us-central1"
+  _REPO: "execlab-repo"
+  _IMAGE_TAG: "latest"
+
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${_IMAGE_TAG}"

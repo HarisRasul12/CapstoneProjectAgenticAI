@@ -1,0 +1,71 @@
+cases:
+  - id: rising_buy
+    ticker: NVDA
+    side: buy
+    trend_bps: 120
+    quantity: 25000
+    expected_sections:
+      - best_algo
+      - thesis
+      - evidence
+      - caveats
+      - limitation
+    required_limitation: "not a production OMS/EMS backtester"
+
+  - id: falling_sell
+    ticker: MSFT
+    side: sell
+    trend_bps: -90
+    quantity: 15000
+    expected_sections:
+      - best_algo
+      - thesis
+      - evidence
+      - caveats
+      - limitation
+    required_limitation: "not a production OMS/EMS backtester"
+
+  - id: flat_high_spread
+    ticker: SPY
+    side: buy
+    trend_bps: 0
+    quantity: 100000
+    spread_bps: 8
+    expected_sections:
+      - best_algo
+      - thesis
+      - evidence
+      - caveats
+      - scenario_interpretation
+      - limitation
+    required_limitation: "not a production OMS/EMS backtester"
+
+  - id: strict_pov_high_quantity
+    ticker: TSLA
+    side: buy
+    trend_bps: 40
+    quantity: 2000000
+    pov_mode: strict_cap
+    expected_sections:
+      - best_algo
+      - thesis
+      - evidence
+      - caveats
+      - limitation
+    required_limitation: "not a production OMS/EMS backtester"
+    require_pov_unfilled: true
+
+  - id: limit_partial_fill
+    ticker: AAPL
+    side: buy
+    trend_bps: 120
+    quantity: 50000
+    limit_price: 99
+    expected_sections:
+      - best_algo
+      - thesis
+      - evidence
+      - caveats
+      - limitation
+    required_limitation: "not a production OMS/EMS backtester"
+    require_unfilled_any_algo: true
