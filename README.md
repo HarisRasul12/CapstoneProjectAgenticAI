@@ -1,6 +1,9 @@
 # ExecLab AI
 By: **Haris Rasul**
 
+
+<img width="911" height="694" alt="Screenshot 2026-05-02 at 12 26 41 PM" src="https://github.com/user-attachments/assets/98a5601e-8d28-4dbd-b417-314d83ff90bf" />
+
 **Live Demo:** https://execlab-ai-q7smatrnpa-uc.a.run.app
 
 **Business Document PDF:** [docs/ExecLab_AI_Business_Document.pdf](docs/ExecLab_AI_Business_Document.pdf)
