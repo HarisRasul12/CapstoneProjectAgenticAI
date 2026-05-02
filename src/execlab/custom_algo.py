@@ -208,6 +208,8 @@ def build_custom_algo_report(
             "user_brief": request.custom_algo_instructions,
             "agent_plan": custom_plan.model_dump(mode="json") if custom_plan is not None else None,
             "agent_plan_status": custom_plan.status if custom_plan is not None else "unavailable",
+            "agent_execution_story": custom_plan.execution_story if custom_plan is not None else "",
+            "agent_operating_rules": custom_plan.operating_rules if custom_plan is not None else [],
         },
         rationale=rationale,
         simulation=simulation,

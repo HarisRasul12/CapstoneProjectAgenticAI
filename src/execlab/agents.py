@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from execlab.config import Settings
-from execlab.schemas import AgentStepReport, CustomAlgoPlan, ExecutionMemo
+from execlab.schemas import AgentStepReport, CustomAlgoPlan, ExecutionMemo, TabNarrativeBook
 
 
 def adk_is_available() -> bool:
@@ -327,6 +327,29 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
         output_key="tab_insight_report_agent",
     )
 
+    tab_narrative_agent = LlmAgent(
+        name="TabNarrativeAgent",
+        model=model,
+        description="Writes opinionated plain-English stories for each Streamlit tab.",
+        instruction=(
+            "Role: senior execution storyteller and desk advisor.\n"
+            "Input: {execution_context} plus the prior specialist reports in state.\n"
+            "Return TabNarrativeBook with narratives for these tab_key values exactly: "
+            "pretrade, risk, peers, debate, counterfactuals, playbook, custom_algo, tca, "
+            "charts, scenario, memo, agent_trace, data_room.\n"
+            "For each tab, write a beautiful but concise human-facing opinion section: "
+            "a title, a one-sentence verdict, a narrative paragraph, an actionable recommendation, "
+            "and 2-4 watch_items. Sound like an experienced execution analyst talking to a junior "
+            "trader. Be opinionated when the data supports it. Tie tables and charts to cause and "
+            "effect: what happened, why it matters, what I would do next. Do not invent numbers. "
+            "Use only visible analyst rationale; do not expose hidden chain-of-thought. Keep the "
+            "OMS/EMS limitation caveat concise when relevant."
+        ),
+        tools=[],
+        output_schema=TabNarrativeBook,
+        output_key="tab_narratives",
+    )
+
     limit_agent = LlmAgent(
         name="LimitFeasibilityAgent",
         model=model,
@@ -354,7 +377,7 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
             "{simulation_report}, {tca_report}, {cause_effect_report}, {fast_execution_argument}, "
             "{liquidity_seeking_argument}, {debate_judge_report}, {counterfactual_report_agent}, "
             "{playbook_report_agent}, {custom_algo_designer_report}, {tab_insight_report_agent}, "
-            "{limit_feasibility_report}.\n"
+            "{tab_narratives}, {limit_feasibility_report}.\n"
             "Few-shot guidance and public reasoning examples:\n"
             f"{few_shot_guidance}\n"
             "Return ExecutionMemo. Include a clear recommendation on algo choice, spread/impact "
@@ -406,6 +429,7 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
             playbook_agent,
             custom_algo_agent,
             tab_insight_agent,
+            tab_narrative_agent,
             limit_agent,
             narrative_agent,
             critic_agent,
@@ -432,6 +456,13 @@ def create_custom_algo_planner_agent(settings: Settings, model_name: str | None 
             "completion_target_time in HH:MM 24-hour market time.\n"
             "- Use urgency_score for PM exposure, adverse tape, must-complete, or risk-reduction needs.\n"
             "- Use liquidity_score for minimize-impact, low-footprint, no-chase, or strict-cap needs.\n"
+            "- Always populate execution_story with a trader-friendly narrative of the custom algo's "
+            "behavior: whether it starts fast or patient, how it blends VWAP/POV/IS/TWAP logic, "
+            "how it handles completion-by-time and max participation, and what the trader should "
+            "expect through the day.\n"
+            "- Always populate operating_rules with 3-5 short behavioral rules, such as when the "
+            "algo accelerates, when it waits for liquidity, how it respects caps, and what would "
+            "trigger a desk review.\n"
             "- component_weights may include vwap_curve, is_urgency, pov_guardrail, twap_stabilizer; "
             "weights should be positive and roughly sum to 1.\n"
             "- If a brief is ambiguous, still provide a usable educational plan and put clarifying "

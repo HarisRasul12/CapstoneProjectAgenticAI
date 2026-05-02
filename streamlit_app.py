@@ -98,6 +98,38 @@ def apply_theme() -> None:
         }
         .agent-box strong { color: #ffffff !important; }
         .agent-box span { color: #c6d0da !important; }
+        .narrative-box {
+            border: 1px solid rgba(14, 165, 233, 0.32);
+            background: #0f1a23;
+            border-left: 4px solid #0ea5e9;
+            border-radius: 8px;
+            padding: 0.9rem 1rem;
+            margin: 0.45rem 0 0.95rem 0;
+        }
+        .narrative-kicker {
+            color: #38bdf8;
+            font-size: 0.78rem;
+            font-weight: 760;
+            text-transform: uppercase;
+            letter-spacing: 0;
+            margin-bottom: 0.2rem;
+        }
+        .narrative-title {
+            color: #ffffff;
+            font-size: 1.05rem;
+            font-weight: 760;
+            margin-bottom: 0.35rem;
+        }
+        .narrative-body {
+            color: #d7e0e8;
+            line-height: 1.48;
+            margin-bottom: 0.45rem;
+        }
+        .narrative-watch {
+            color: #aeb8c2;
+            font-size: 0.86rem;
+            margin-top: 0.4rem;
+        }
         div[data-testid="stDataFrame"] {
             border: 1px solid rgba(255, 255, 255, 0.10);
             border-radius: 8px;
@@ -199,6 +231,39 @@ def render_insights(result, tab_key: str) -> None:
             """,
             unsafe_allow_html=True,
         )
+
+
+def render_agent_narrative(result, tab_key: str) -> None:
+    narratives = getattr(result, "agent_narratives", {}) or {}
+    narrative = narratives.get(tab_key)
+    if narrative is None:
+        if getattr(result, "adk_status", "") not in {"success"}:
+            st.info(
+                "The AI model narrative for this tab appears after a successful ADK/Vertex run. "
+                "The audited tables are still available below."
+            )
+        return
+    watch_items = "".join(
+        f"<li>{escape(str(item))}</li>" for item in narrative.watch_items[:4]
+    )
+    watch_block = (
+        f"<div class=\"narrative-watch\"><strong>Watch next:</strong><ul>{watch_items}</ul></div>"
+        if watch_items
+        else ""
+    )
+    st.markdown(
+        f"""
+        <div class="narrative-box">
+          <div class="narrative-kicker">AI model opinion</div>
+          <div class="narrative-title">{escape(narrative.title)}</div>
+          <div class="narrative-body"><strong>Verdict:</strong> {escape(narrative.verdict)}</div>
+          <div class="narrative-body">{escape(narrative.narrative)}</div>
+          <div class="narrative-body"><strong>Recommendation:</strong> {escape(narrative.recommendation)}</div>
+          {watch_block}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def main() -> None:
@@ -396,6 +461,7 @@ def render_result(result) -> None:
             "TCA compares each schedule against arrival price, market VWAP, and close. "
             "For the selected side, lower bps is better; positive bps means the execution was worse than the benchmark.",
         )
+        render_agent_narrative(result, "tca")
         render_insights(result, "tca")
         display = metrics_df[
             [
@@ -461,6 +527,7 @@ def render_result(result) -> None:
             "These charts show how each pseudo execution agent would trade through the day, where fills occur, "
             "and whether participation or limit rules block shares.",
         )
+        render_agent_narrative(result, "charts")
         render_insights(result, "charts")
         c1, c2 = st.columns(2)
         with c1:
@@ -478,6 +545,7 @@ def render_result(result) -> None:
             "The scenario lab perturbs spread, drift, and impact assumptions. It is an expected-cost stress test, "
             "not a venue-level fill simulator.",
         )
+        render_agent_narrative(result, "scenario")
         render_insights(result, "scenario")
         scenario_df = pd.DataFrame([item.model_dump() for item in result.scenario_report.results])
         st.plotly_chart(scenario_chart(scenario_df), use_container_width=True)
@@ -506,6 +574,7 @@ def render_result(result) -> None:
             "The final agents consume the computed tool outputs, peer cluster report, beta risk map, and TCA bullets "
             "to write a recommendation memo.",
         )
+        render_agent_narrative(result, "memo")
         render_insights(result, "memo")
         st.markdown(
             f"""
@@ -540,6 +609,7 @@ def render_result(result) -> None:
             "All audited tools",
             "This is the audit trail: modeled fill rows, blocked fills, and the sequence of tool calls used by the agents.",
         )
+        render_agent_narrative(result, "data_room")
         render_insights(result, "data_room")
         fill_df = fills_dataframe(result)
         st.dataframe(fill_df, use_container_width=True, hide_index=True)
@@ -563,6 +633,7 @@ def render_pretrade_lab(result) -> None:
         "This tab converts 21 live intraday sessions into liquidity, spread-proxy, volatility, time-risk, "
         "and expected-cost features. The regression is transparent OLS; the spread is a high-low proxy, not NBBO.",
     )
+    render_agent_narrative(result, "pretrade")
     render_insights(result, "pretrade")
     st.markdown(
         f"""
@@ -614,6 +685,7 @@ def render_risk_model(result) -> None:
         "This tab separates execution impact from market timing risk. It maps the stock to SPY and a sector ETF, "
         "then compares the selected stock's intraday move against those index paths.",
     )
+    render_agent_narrative(result, "risk")
     render_insights(result, "risk")
     st.markdown(
         f"""
@@ -684,6 +756,7 @@ def render_peer_analysis(result) -> None:
         "The peer agent looks inside the mapped sector ETF, finds stocks most correlated with the target, "
         "checks whether their recent moves confirm the target move, and translates that into fast/slow execution pressure.",
     )
+    render_agent_narrative(result, "peers")
     render_insights(result, "peers")
     st.markdown(
         f"""
@@ -744,6 +817,7 @@ def render_agent_debate(result) -> None:
         "FastExecutionAdvocate, LiquiditySeekingAdvocate, DebateJudgeAgent",
         "Two agents argue opposite execution philosophies. The judge then chooses which argument is better grounded in the computed TCA, pre-trade, beta, peer, and completion data.",
     )
+    render_agent_narrative(result, "debate")
     render_insights(result, "debate")
     st.markdown(
         f"""
@@ -784,6 +858,7 @@ def render_counterfactuals(result) -> None:
         "CounterfactualAgent",
         "This agent asks what would have made another algo win. It stress-tests the recommendation under flat tape, wider spread, larger order, peer crowding, and completion-adjusted assumptions.",
     )
+    render_agent_narrative(result, "counterfactuals")
     render_insights(result, "counterfactuals")
     st.write(report.summary)
     scenario_rows = []
@@ -818,6 +893,7 @@ def render_playbook(result) -> None:
         "ExecutionPlaybookAgent",
         "This converts the backtest, debate, and counterfactuals into desk-style operating guidance: what to run, how urgently, when to switch, and what to monitor.",
     )
+    render_agent_narrative(result, "playbook")
     render_insights(result, "playbook")
     st.markdown(
         f"""
@@ -851,7 +927,9 @@ def render_custom_algo(result) -> None:
         "CustomAlgoPlannerAgent, CustomAlgoDesignerAgent, TabInsightAgent, ExecutionSimulatorAgent",
         "This tab lets ADK interpret the desk brief into a structured custom plan, builds a hybrid schedule from that plan, then backtests it with the same bar-based fill model. It is a research idea, not production routing logic.",
     )
+    render_agent_narrative(result, "custom_algo")
     render_custom_algo_chat(result)
+    render_custom_algo_behavior_story(result)
     render_insights(result, "custom_algo")
     st.markdown(
         f"""
@@ -916,6 +994,51 @@ def render_custom_algo(result) -> None:
         st.caption(item)
 
 
+def render_custom_algo_behavior_story(result) -> None:
+    report = result.custom_algo_report
+    parameters = report.parameters or {}
+    agent_plan = parameters.get("agent_plan")
+    story = str(parameters.get("agent_execution_story") or "").strip()
+    operating_rules = parameters.get("agent_operating_rules") or []
+    if not story and isinstance(agent_plan, dict):
+        story = str(agent_plan.get("execution_story") or "").strip()
+        operating_rules = operating_rules or agent_plan.get("operating_rules", [])
+
+    if not story:
+        if result.request.custom_algo_instructions and getattr(result, "adk_status", "") != "success":
+            st.info(
+                "CustomAlgoPlannerAgent will write the behavior story after a successful ADK/Vertex run."
+            )
+        return
+
+    rule_items = "".join(
+        f"<li>{escape(str(item))}</li>" for item in list(operating_rules)[:5]
+    )
+    rules_block = (
+        f"<div class=\"narrative-watch\"><strong>Operating rules:</strong><ul>{rule_items}</ul></div>"
+        if rule_items
+        else ""
+    )
+    brief = str(parameters.get("user_brief") or "").strip()
+    brief_block = (
+        f"<div class=\"narrative-body\"><strong>Desk brief:</strong> {escape(brief)}</div>"
+        if brief
+        else ""
+    )
+    st.markdown(
+        f"""
+        <div class="narrative-box">
+          <div class="narrative-kicker">CustomAlgoPlannerAgent behavior story</div>
+          <div class="narrative-title">How this custom algo would trade</div>
+          {brief_block}
+          <div class="narrative-body">{escape(story)}</div>
+          {rules_block}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_custom_algo_chat(result) -> None:
     st.subheader("Custom algo design chat")
     st.caption(
@@ -958,6 +1081,7 @@ def render_agent_trace(result) -> None:
         "ExecLabCoordinatorAgent and all sub-agents",
         "This shows the handoff map and tool trace. It is the audit evidence that the app is agentic and grounded in tools.",
     )
+    render_agent_narrative(result, "agent_trace")
     render_insights(result, "agent_trace")
     pipeline = [
         ("MarketDataAgent", "Validates live bars and benchmark prices"),
@@ -978,6 +1102,7 @@ def render_agent_trace(result) -> None:
         ("ExecutionPlaybookAgent", "Writes monitoring triggers and switch rules"),
         ("CustomAlgoDesignerAgent", "Builds and explains a hybrid strategy for this tape"),
         ("TabInsightAgent", "Generates live ADK commentary from the computed context"),
+        ("TabNarrativeAgent", "Writes model-authored opinion sections for every dashboard tab"),
         ("NarrativeExplanationAgent", "Drafts the execution memo"),
         ("CriticGoldenSetAgent", "Checks caveats, numbers, and final recommendation"),
     ]
@@ -995,6 +1120,7 @@ def render_agent_trace(result) -> None:
             {"Check": "Has debate and counterfactual reports", "Status": "Pass" if result.debate_report.recommended_algo and result.counterfactual_report.scenarios else "Review"},
             {"Check": "Has custom algo designer output", "Status": "Pass" if result.custom_algo_report.components else "Review"},
             {"Check": "Has ADK agent commentary", "Status": "Pass" if result.agent_reports else "Needs ADK run"},
+            {"Check": "Has AI tab narratives", "Status": "Pass" if result.agent_narratives else "Needs ADK run"},
         ]
     )
     st.subheader("Rubric QA")

@@ -27,6 +27,19 @@ def test_custom_algo_uses_agent_plan_for_completion_and_participation() -> None:
         pm_exposure_summary="Reduce exposure before the late-morning risk window.",
         risk_constraints=["Keep participation at or below 12%."],
         style_hint="front_loaded_is",
+        execution_story=(
+            "This custom algo starts with controlled urgency because the PM wants exposure down "
+            "before 11:00. It leans on IS-style front-loading early, but it does not simply sweep "
+            "the tape; the POV guardrail keeps child orders near the requested cap. After the "
+            "deadline, it settles into volume-aware pacing and uses a small TWAP stabilizer so "
+            "residual shares do not become lumpy. The trader should expect a fast first act, then "
+            "a more patient liquidity-seeking finish."
+        ),
+        operating_rules=[
+            "Prioritize the 11:00 completion target without breaching the 12% cap.",
+            "Use volume curve liquidity before forcing urgency.",
+            "Escalate for desk review if cap capacity cannot meet the target.",
+        ],
         component_weights={
             "vwap_curve": 0.20,
             "is_urgency": 0.45,
@@ -56,6 +69,8 @@ def test_custom_algo_uses_agent_plan_for_completion_and_participation() -> None:
 
     assert report.parameters["agent_plan"]["objective_summary"].startswith("PM wants")
     assert report.parameters["agent_plan_status"] == "ok"
+    assert report.parameters["agent_execution_story"].startswith("This custom algo starts")
+    assert report.parameters["agent_operating_rules"]
     assert fills_by_deadline >= int(0.60 * request.quantity)
     assert max_participation <= 0.12001
     assert report.components
@@ -80,6 +95,8 @@ def test_custom_algo_does_not_parse_chat_brief_without_agent_plan() -> None:
 
     assert report.parameters["agent_plan"] is None
     assert report.parameters["agent_plan_status"] == "unavailable"
+    assert report.parameters["agent_execution_story"] == ""
+    assert report.parameters["agent_operating_rules"] == []
     assert "interpreted_constraints" not in report.parameters
     assert schedule["target_quantity"].sum() == request.quantity
 

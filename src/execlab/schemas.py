@@ -387,6 +387,18 @@ class CustomAlgoPlan(BaseModel):
         default="adaptive_hybrid",
         description="Suggested style such as liquidity_seeker, front_loaded_is, adaptive_vwap, or limit_aware.",
     )
+    execution_story: str = Field(
+        description=(
+            "Four to six sentence plain-English story of how the custom algo would behave "
+            "through the trading window: how it starts, how it paces, what it caps, how it "
+            "responds to the user's brief, and what the trader should expect. Use visible "
+            "analyst rationale only."
+        )
+    )
+    operating_rules: list[str] = Field(
+        default_factory=list,
+        description="Three to five short operating rules that describe the custom algo's behavior.",
+    )
     component_weights: dict[str, float] = Field(
         default_factory=dict,
         description="Optional weights for vwap_curve, is_urgency, pov_guardrail, and twap_stabilizer.",
@@ -424,6 +436,40 @@ class AgentStepReport(BaseModel):
     )
 
 
+class TabNarrative(BaseModel):
+    tab_key: str = Field(
+        description=(
+            "Stable Streamlit tab key, such as pretrade, risk, peers, debate, "
+            "counterfactuals, playbook, custom_algo, tca, charts, scenario, memo, "
+            "agent_trace, or data_room."
+        )
+    )
+    title: str = Field(description="Short human-readable title for the agent opinion.")
+    verdict: str = Field(
+        description="One-sentence opinionated recommendation or read for this tab."
+    )
+    narrative: str = Field(
+        description=(
+            "Plain-English narrative that tells the story of what this tab means. "
+            "Use visible analyst rationale, not hidden chain-of-thought."
+        )
+    )
+    recommendation: str = Field(
+        description="Actionable execution guidance grounded in the computed tab data."
+    )
+    watch_items: list[str] = Field(
+        default_factory=list,
+        description="Two to four concrete things the user should monitor.",
+    )
+
+
+class TabNarrativeBook(BaseModel):
+    narratives: list[TabNarrative] = Field(
+        default_factory=list,
+        description="Agent-written opinion narratives for the Streamlit tabs.",
+    )
+
+
 class ExecutionMemo(BaseModel):
     best_algo: str
     thesis: str
@@ -457,6 +503,7 @@ class RunResult:
     scenario_report: ScenarioReport
     memo: ExecutionMemo
     agent_reports: dict[str, AgentStepReport] = field(default_factory=dict)
+    agent_narratives: dict[str, TabNarrative] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     adk_status: str = "not_attempted"
     adk_attempted: bool = False

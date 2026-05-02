@@ -3,6 +3,8 @@ By: **Haris Rasul**
 
 **Live Demo:** https://execlab-ai-q7smatrnpa-uc.a.run.app
 
+**Business Document PDF:** [docs/ExecLab_AI_Business_Document.pdf](docs/ExecLab_AI_Business_Document.pdf)
+
 ExecLab AI is a Streamlit + Google ADK + Vertex AI multi-agent execution backtesting lab. It live-fetches public intraday OHLCV bars, compares TWAP, VWAP, POV, and implementation-shortfall style schedules, computes transaction-cost metrics, and produces an execution analyst memo.
 
 > Framing: ExecLab AI is a bar-based execution research simulator for comparing benchmark schedules. It is not a production OMS/EMS backtester.
@@ -15,12 +17,12 @@ Deployment target: Cloud Run service `execlab-ai`.
 Verified deployment:
 - project: `ieor-4576-agents-haris`
 - region: `us-central1`
-- latest verified revision: `execlab-ai-00005-b5j`
+- latest verified revision: `execlab-ai-00008-m79`
 - public URL smoke test: HTTP `200`
 - online planner ADK/Vertex smoke test: Cloud Run Job `execlab-ai-adk-smoke-xjccp` completed successfully
-- online full multi-agent ADK/Vertex smoke test: Cloud Run Job `execlab-ai-full-adk-smoke-lpr5k` completed successfully
+- online full multi-agent ADK/Vertex smoke test: Cloud Run Job execution `execlab-ai-full-adk-smoke-ggt8g` completed successfully
 - ADK smoke result: `ADK_SMOKE_OK {"completion_target_pct": 0.5, "completion_target_time": "11:00", "max_participation_rate": 0.1, "status": "ok", "style_hint": "adaptive_vwap"}`
-- full ADK smoke result: `ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_report_count": 19, "best_algo": "POV", "model": "gemini-2.5-flash-lite", "runtime_seconds": 37.428}`
+- full ADK smoke result: `ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_narrative_count": 13, "agent_report_count": 19, "best_algo": "POV", "custom_algo_story": true, "model": "gemini-2.5-flash-lite", "runtime_seconds": 54.599}`
 
 ## Capstone Requirements Checklist
 | Requirement | How ExecLab AI satisfies it | Evidence |
@@ -105,6 +107,7 @@ The agents have different cognitive jobs:
 - `DebateJudgeAgent` chooses the better-supported view.
 - `CustomAlgoPlannerAgent` translates user chat constraints into a structured algo plan.
 - `CustomAlgoDesignerAgent` explains how that plan becomes a hybrid schedule.
+- `TabNarrativeAgent` writes the human, opinionated "AI model opinion" section that appears before each tab's charts and tables.
 - `NarrativeExplanationAgent` writes the final memo using few-shot examples.
 - `CriticGoldenSetAgent` reviews the memo for grounding, caveats, and assignment-safe limitation language.
 
@@ -113,8 +116,9 @@ The result is a multi-agent reasoning product: users see specialized commentary 
 ### Structured Outputs And Schemas
 The app uses Pydantic schemas to make agent outputs reliable:
 - `AgentStepReport`: status, highlights, caveats for tab-level agent commentary.
+- `TabNarrativeBook`: tab-keyed titles, verdicts, narratives, recommendations, and watch items for the AI model opinion sections.
 - `ExecutionMemo`: best algo, thesis, evidence, caveats, scenario interpretation, limitation.
-- `CustomAlgoPlan`: objective summary, urgency score, liquidity score, max participation, completion target, PM exposure, risk constraints, style hint, component weights, rationale, and follow-up questions.
+- `CustomAlgoPlan`: objective summary, urgency score, liquidity score, max participation, completion target, PM exposure, risk constraints, style hint, execution story, operating rules, component weights, rationale, and follow-up questions.
 
 These schemas are central to deployment stability. A loose text response can break a dashboard; a schema can be validated, tested, and shown consistently.
 
@@ -131,12 +135,12 @@ reduce exposure, but avoid chasing liquidity.
 ### Agent Evaluation And Deployment Proof
 The project includes two levels of ADK smoke tests:
 - `uv run adk-smoke`: verifies that the deployed runtime can call `CustomAlgoPlannerAgent` through Vertex and receive a structured plan.
-- `uv run full-adk-smoke`: verifies the complete service path, including custom planner, full `SequentialAgent` handoff, tab reports, and final memo.
+- `uv run full-adk-smoke`: verifies the complete service path, including custom planner, full `SequentialAgent` handoff, tab reports, AI tab narratives, and final memo.
 
 The latest deployed full smoke returned:
 
 ```text
-ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_report_count": 19, "best_algo": "POV", "model": "gemini-2.5-flash-lite", "runtime_seconds": 40.168}
+ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_narrative_count": 13, "agent_report_count": 19, "best_algo": "POV", "custom_algo_story": true, "model": "gemini-2.5-flash-lite", "runtime_seconds": 54.599}
 ```
 
 ## What The App Does
@@ -170,6 +174,8 @@ Outputs:
 - execution playbook with urgency, participation guidance, monitoring triggers, and switch rules
 - custom agent-designed hybrid algo with component weights, adaptive participation cap, and its own simulated TCA
 - Custom Algo chat where the user can give a desk brief: urgency, max participation, PM exposure, completion-by-time target, and risk constraints
+- CustomAlgoPlannerAgent behavior story explaining how the new hybrid algo would actually trade through the day
+- AI model opinion section at the top of every tab, written by `TabNarrativeAgent`, giving a plain-English verdict, story, recommendation, and watch list before the numeric analysis
 - ADK agent commentary in every tab explaining why the visible stats matter
 - agent trace / rubric QA tab showing the multi-agent handoff and tool audit trail
 - tab-level agent descriptions and stat commentary explaining what each number means
@@ -287,6 +293,7 @@ ExecLab AI uses Google ADK `SequentialAgent` handoff. The root coordinator is cr
 | `CustomAlgoPlannerAgent` | `custom_algo_plan` | `CustomAlgoPlan` | Converts the user's natural-language desk brief into structured constraints. |
 | `CustomAlgoDesignerAgent` | `custom_algo_designer_report` | `AgentStepReport` | Explains the custom hybrid schedule built from the agent plan. |
 | `TabInsightAgent` | `tab_insight_report_agent` | `AgentStepReport` | Provides tab-level commentary so each UI section has an agent explanation. |
+| `TabNarrativeAgent` | `tab_narratives` | `TabNarrativeBook` | Writes a plain-English AI model opinion, verdict, recommendation, and watch list for each dashboard tab. |
 | `LimitFeasibilityAgent` | `limit_feasibility_report` | `AgentStepReport` | Explains what executes or remains blocked under a limit price. |
 | `NarrativeExplanationAgent` | `execution_memo_draft` | `ExecutionMemo` | Writes the first final memo using few-shot execution-analysis style. |
 | `CriticGoldenSetAgent` | `execution_memo` | `ExecutionMemo` | Reviews and revises the memo for grounding, caveats, and limitation language. |
@@ -307,7 +314,7 @@ Audited calculations are implemented as Python tool functions in the orchestrato
    `src/execlab/prompt/few_shots.yaml` contains analyst-style examples for explaining performance, causality, slippage, and caveats. `NarrativeExplanationAgent` receives this guidance so the final memo is not generic chatbot prose; it follows an execution-analysis pattern: observation, driver, effect, recommendation, caveat.
 
 5. **Structured outputs / schema-constrained generation**  
-   ADK agents use `output_schema` objects from `src/execlab/schemas.py`. This includes `AgentStepReport`, `ExecutionMemo`, and `CustomAlgoPlan`. The UI and tests depend on typed objects, not unstructured text blobs.
+   ADK agents use `output_schema` objects from `src/execlab/schemas.py`. This includes `AgentStepReport`, `TabNarrativeBook`, `ExecutionMemo`, and `CustomAlgoPlan`. The UI and tests depend on typed objects, not unstructured text blobs.
 
 6. **Agentic planning from natural language**  
    `CustomAlgoPlannerAgent` in `src/execlab/agents.py` turns a user chat brief into a `CustomAlgoPlan`. The scheduler in `src/execlab/custom_algo.py` uses that plan to build the custom schedule. The tests in `tests/test_custom_algo_agentic.py` verify that custom behavior is driven by the agent-authored plan and that no hidden deterministic parser is used when ADK is unavailable.
@@ -319,7 +326,7 @@ Audited calculations are implemented as Python tool functions in the orchestrato
    `evals/datasets/golden_cases.yaml`, `evals/rubrics/rubric.yaml`, and `evals/run_evals.py` check deterministic math, schedule validity, memo sections, limitation wording, pre-trade analytics, beta/peer reports, custom algo outputs, strict POV behavior, and limit-price partial-fill cases.
 
 9. **Deployment and operational verification**  
-   `cloudbuild.yaml`, `Dockerfile`, and `src/execlab/cloud_smoke.py` support Cloud Run deployment and online ADK verification. The full smoke test proves that the deployed image can run the custom planner, full ADK handoff, 19 agent reports, and final memo without falling back.
+   `cloudbuild.yaml`, `Dockerfile`, and `src/execlab/cloud_smoke.py` support Cloud Run deployment and online ADK verification. The full smoke test proves that the deployed image can run the custom planner, full ADK handoff, 19 agent reports, 13 AI tab narratives, and final memo without falling back.
 
 ## Run Locally
 ```bash
@@ -474,7 +481,7 @@ gcloud run jobs execute execlab-ai-full-adk-smoke \
   --wait
 ```
 
-The expected full smoke log contains `ADK_FULL_SMOKE_OK`, proving that the deployed image can run the complete backtest service, `CustomAlgoPlannerAgent`, full ADK `SequentialAgent` handoff, tab agent reports, and final Gemini execution memo without falling back.
+The expected full smoke log contains `ADK_FULL_SMOKE_OK`, proving that the deployed image can run the complete backtest service, `CustomAlgoPlannerAgent`, full ADK `SequentialAgent` handoff, tab agent reports, AI tab narratives, and final Gemini execution memo without falling back.
 
 ## Important Limitations
 - Public OHLCV bars cannot perfectly simulate queue position, venue selection, hidden liquidity, child-order fill probability, spread capture, real market impact, or tick-level adverse selection.

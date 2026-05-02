@@ -22,6 +22,8 @@ def main() -> None:
         raise SystemExit("ADK/Vertex smoke failed: ADK is not available from runtime settings.")
 
     plan = asyncio.run(_run_planner_smoke())
+    if not plan.execution_story.strip():
+        raise SystemExit("ADK/Vertex smoke failed: CustomAlgoPlannerAgent returned no execution story.")
     payload = plan.model_dump(mode="json")
     print(
         "ADK_SMOKE_OK "
@@ -32,6 +34,8 @@ def main() -> None:
                 "max_participation_rate": payload.get("max_participation_rate"),
                 "completion_target_pct": payload.get("completion_target_pct"),
                 "completion_target_time": payload.get("completion_target_time"),
+                "has_execution_story": bool(payload.get("execution_story")),
+                "operating_rule_count": len(payload.get("operating_rules") or []),
             },
             sort_keys=True,
         )
@@ -73,6 +77,10 @@ def full_main() -> None:
         )
     if not result.agent_reports:
         raise SystemExit("Full ADK smoke failed: no specialist agent reports returned.")
+    if not result.agent_narratives:
+        raise SystemExit("Full ADK smoke failed: no AI tab narratives returned.")
+    if not result.custom_algo_report.parameters.get("agent_execution_story"):
+        raise SystemExit("Full ADK smoke failed: custom algo behavior story was not returned.")
     if not result.memo.best_algo:
         raise SystemExit("Full ADK smoke failed: no final memo best_algo returned.")
 
@@ -82,7 +90,11 @@ def full_main() -> None:
             {
                 "adk_status": result.adk_status,
                 "agent_report_count": len(result.agent_reports),
+                "agent_narrative_count": len(result.agent_narratives),
                 "best_algo": result.memo.best_algo,
+                "custom_algo_story": bool(
+                    result.custom_algo_report.parameters.get("agent_execution_story")
+                ),
                 "model": result.adk_model_used,
                 "runtime_seconds": result.runtime_seconds,
             },

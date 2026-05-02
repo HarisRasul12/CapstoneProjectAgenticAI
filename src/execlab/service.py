@@ -48,6 +48,8 @@ from execlab.schemas import (
     PreTradeAnalyticsReport,
     RunResult,
     SimulationResult,
+    TabNarrative,
+    TabNarrativeBook,
     TcaCausalReport,
 )
 from execlab.simulator import run_cost_scenario_lab as run_scenario_lab
@@ -81,6 +83,7 @@ class ToolRuntime:
     warnings: list[str] = field(default_factory=list)
     state_delta: dict[str, object] = field(default_factory=dict)
     agent_reports: dict[str, AgentStepReport] = field(default_factory=dict)
+    agent_narratives: dict[str, TabNarrative] = field(default_factory=dict)
     adk_status: str = "not_attempted"
     adk_attempted: bool = False
     adk_error_summary: str | None = None
@@ -734,6 +737,7 @@ class ExecLabService:
             runtime.adk_attempted = True
             self._run_adk_with_candidates(runtime, toolset)
             runtime.agent_reports = self._agent_reports_from_state(runtime.state_delta)
+            runtime.agent_narratives = self._agent_narratives_from_state(runtime.state_delta)
             memo = self._memo_from_state(runtime.state_delta)
 
         if memo is None:
@@ -780,6 +784,7 @@ class ExecLabService:
             scenario_report=runtime.scenario_report,
             memo=memo,
             agent_reports=runtime.agent_reports,
+            agent_narratives=runtime.agent_narratives,
             warnings=_dedupe(runtime.warnings),
             adk_status=runtime.adk_status,
             adk_attempted=runtime.adk_attempted,
@@ -1227,6 +1232,25 @@ class ExecLabService:
                 except Exception:
                     continue
         return reports
+
+    @staticmethod
+    def _agent_narratives_from_state(state: dict[str, object]) -> dict[str, TabNarrative]:
+        payload = state.get("tab_narratives")
+        book: TabNarrativeBook | None = None
+        if isinstance(payload, TabNarrativeBook):
+            book = payload
+        elif isinstance(payload, dict):
+            try:
+                book = TabNarrativeBook.model_validate(payload)
+            except Exception:
+                book = None
+        if book is None:
+            return {}
+        return {
+            narrative.tab_key: narrative
+            for narrative in book.narratives
+            if narrative.tab_key
+        }
 
     @staticmethod
     def _fallback_memo(summary: dict) -> ExecutionMemo:
