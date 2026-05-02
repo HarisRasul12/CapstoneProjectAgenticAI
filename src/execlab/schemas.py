@@ -32,6 +32,7 @@ class ExecutionRequest(BaseModel):
     drift_bps_per_day: float = Field(default=0.0, ge=-500.0, le=500.0)
     scenario_paths: int = Field(default=300, ge=50, le=2000)
     seed: int = Field(default=4576)
+    custom_algo_instructions: str = Field(default="", max_length=4000)
     user_id: str = "local-user"
 
     @field_validator("ticker")
@@ -49,6 +50,11 @@ class ExecutionRequest(BaseModel):
         if not deduped:
             raise ValueError("At least one algorithm must be selected.")
         return deduped
+
+    @field_validator("custom_algo_instructions")
+    @classmethod
+    def clean_custom_algo_instructions(cls, value: str) -> str:
+        return " ".join(str(value or "").split())
 
     @field_validator("end_time")
     @classmethod
@@ -290,10 +296,132 @@ class TcaCausalReport(BaseModel):
     caveats: list[str] = Field(default_factory=list)
 
 
-class AgentStepReport(BaseModel):
-    status: str
-    highlights: list[str] = Field(default_factory=list)
+class DebateCase(BaseModel):
+    advocate: str
+    stance: str
+    recommended_algos: list[str] = Field(default_factory=list)
+    thesis: str
+    evidence: list[str] = Field(default_factory=list)
     caveats: list[str] = Field(default_factory=list)
+
+
+class DebateReport(BaseModel):
+    fast_case: DebateCase
+    liquidity_case: DebateCase
+    judge_winner: str
+    recommended_algo: str
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    deciding_factors: list[str] = Field(default_factory=list)
+    judge_rationale: str
+
+
+class CounterfactualScenario(BaseModel):
+    name: str
+    assumption_change: str
+    estimated_winner: str
+    current_winner: str
+    estimated_costs_bps: dict[str, float] = Field(default_factory=dict)
+    rationale: str
+
+
+class CounterfactualReport(BaseModel):
+    base_winner: str
+    scenarios: list[CounterfactualScenario] = Field(default_factory=list)
+    summary: str
+
+
+class ExecutionPlaybookReport(BaseModel):
+    recommended_algo: str
+    urgency: str
+    participation_guidance: str
+    limit_guidance: str
+    monitoring_triggers: list[str] = Field(default_factory=list)
+    switch_rules: list[str] = Field(default_factory=list)
+    rationale: str
+
+
+class CustomAlgoComponent(BaseModel):
+    name: str
+    weight: float = Field(ge=0.0, le=1.0)
+    reason: str
+
+
+class CustomAlgoPlan(BaseModel):
+    status: str = Field(description="ok, needs_clarification, or warning")
+    objective_summary: str = Field(
+        description="Concise summary of the user's execution objective."
+    )
+    urgency_score: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="Agent-read urgency from the user's brief and market context.",
+    )
+    liquidity_score: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Agent-read need to minimize footprint and seek liquidity.",
+    )
+    max_participation_rate: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Maximum participation cap requested by the user, if any.",
+    )
+    completion_target_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Share of the order the user wants completed by a target time.",
+    )
+    completion_target_time: str | None = Field(
+        default=None,
+        description="Target completion clock time such as 11:00 or 14:30.",
+    )
+    must_complete: bool = False
+    strict_cap: bool = False
+    pm_exposure_summary: str = ""
+    risk_constraints: list[str] = Field(default_factory=list)
+    style_hint: str = Field(
+        default="adaptive_hybrid",
+        description="Suggested style such as liquidity_seeker, front_loaded_is, adaptive_vwap, or limit_aware.",
+    )
+    component_weights: dict[str, float] = Field(
+        default_factory=dict,
+        description="Optional weights for vwap_curve, is_urgency, pov_guardrail, and twap_stabilizer.",
+    )
+    rationale: list[str] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
+
+
+class CustomAlgoReport(BaseModel):
+    name: str
+    style: str
+    description: str
+    components: list[CustomAlgoComponent] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    rationale: list[str] = Field(default_factory=list)
+    simulation: SimulationResult
+    caveats: list[str] = Field(default_factory=list)
+
+
+class AgentStepReport(BaseModel):
+    status: str = Field(
+        description="Short status such as ok, warning, or review."
+    )
+    highlights: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Three to five visible analyst reasoning bullets. Each bullet should connect a "
+            "computed observation to the execution implication. Do not include hidden chain-of-thought."
+        ),
+    )
+    caveats: list[str] = Field(
+        default_factory=list,
+        description="Important limitations, data caveats, or risk warnings for this agent section.",
+    )
 
 
 class ExecutionMemo(BaseModel):
@@ -321,8 +449,14 @@ class RunResult:
     beta_risk_report: BetaRiskReport
     peer_report: PeerStockAnalysisReport
     causal_report: TcaCausalReport
+    debate_report: DebateReport
+    counterfactual_report: CounterfactualReport
+    playbook_report: ExecutionPlaybookReport
+    custom_schedule: pd.DataFrame
+    custom_algo_report: CustomAlgoReport
     scenario_report: ScenarioReport
     memo: ExecutionMemo
+    agent_reports: dict[str, AgentStepReport] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     adk_status: str = "not_attempted"
     adk_attempted: bool = False

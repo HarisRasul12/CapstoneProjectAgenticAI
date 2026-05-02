@@ -1,17 +1,247 @@
-examples:
-  - user: "NVDA buy order on a rising day"
-    assistant: >
-      The stock moved upward after the open, so the front-loaded IS schedule benefited from
-      trading earlier. VWAP stayed closest to market VWAP because it tracked the volume curve.
-      TWAP lagged because it kept trading into higher prices.
-  - user: "SPY sell order on a falling day"
-    assistant: >
-      For a sell order, lower later prices make slow schedules expensive versus arrival.
-      A front-loaded schedule can protect arrival cost, while VWAP is usually strongest when
-      the goal is to match the market's volume-weighted benchmark.
-  - user: "High spread and high participation"
-    assistant: >
-      The schedule with the highest bar participation absorbs more spread and impact penalty.
-      That may dominate the raw price-path advantage, so the memo should separate timing
-      benefit from liquidity cost.
+prompt_asset: execlab_execution_memo_few_shots
+version: 2
 
+reasoning_policy:
+  note: >
+    Do not expose hidden chain-of-thought. Use a concise, public analyst rationale instead:
+    state the observation, the driver, the benchmark effect, and the recommendation.
+  visible_reasoning_format:
+    - "Observation: what moved, which benchmark changed, or which schedule diagnostic matters."
+    - "Driver: price path, volume curve fit, spread/impact, participation cap, limit feasibility, beta risk, or peer crowding."
+    - "Effect: explain why the driver helped or hurt each algo in bps/completion terms."
+    - "Recommendation: choose the algo and name the caveat that could overturn it."
+
+analysis_sequence:
+  - step: "Normalize side and sign"
+    instruction: >
+      Positive cost is bad for the selected side. For buys, fills above arrival/VWAP/close are bad.
+      For sells, fills below arrival/VWAP/close are bad.
+  - step: "Rank algorithms by primary benchmark"
+    instruction: >
+      Use arrival cost as the default winner unless the memo explicitly says the user cares most about VWAP,
+      close, completion, or limit discipline.
+  - step: "Diagnose price-path timing"
+    instruction: >
+      Rising tape generally favors earlier buy execution and later sell execution. Falling tape generally
+      favors later buy execution and earlier sell execution. Say when a slow algo won only because the realized
+      tape moved favorably.
+  - step: "Diagnose volume-curve fit"
+    instruction: >
+      VWAP should be praised when it stays close to market VWAP and follows the historical/current volume curve.
+      Penalize it if the curve source is same-day fallback or if volume shifted late/early.
+  - step: "Diagnose spread and impact"
+    instruction: >
+      High spread proxy and high participation make aggressive schedules more expensive. Separate timing benefit
+      from liquidity cost so the memo does not confuse lucky timing with efficient execution.
+  - step: "Diagnose completion"
+    instruction: >
+      Strict POV can be best on cost but unusable if it leaves shares unfilled. Force-complete POV can finish
+      but should be called out when it violates the participation cap.
+  - step: "Diagnose limit feasibility"
+    instruction: >
+      If a limit blocks fills, compare completed quantity before comparing bps. Great slippage on tiny completion
+      is not a true execution win.
+  - step: "Diagnose beta and peer risk"
+    instruction: >
+      If systematic/sector risk dominates, waiting exposes the order to market and ETF movement. If idiosyncratic
+      risk dominates, stock-specific tape and peer clustering matter more than broad beta.
+  - step: "Write the memo"
+    instruction: >
+      Use concrete numbers from the context. Avoid generic finance language. End with a practical execution
+      recommendation and the bar-data/OMS caveat.
+
+examples:
+  - id: rising_buy_front_loaded_wins
+    user_case: "Buy order, rising price path, IS best by arrival"
+    visible_reasoning:
+      observation: "The stock rose from arrival to close, so later fills were more expensive for a buy order."
+      driver: "Price-path timing dominated the benchmark comparison."
+      effect: "IS traded earlier, reducing exposure to the rising tape; TWAP and VWAP kept buying into higher bars."
+      recommendation: "Use IS or higher-urgency VWAP if arrival cost is the primary benchmark."
+    assistant: >
+      IS was best versus arrival because the stock moved upward after the open and early fills avoided later
+      higher prices. VWAP stayed closer to market VWAP because it tracked the volume curve, but it did not
+      protect arrival as well as IS. TWAP lagged because it kept buying during later, more expensive intervals.
+      The result is mostly a timing win, so if spread or impact rises, reduce urgency or use a capped POV.
+
+  - id: falling_buy_slow_schedule_wins
+    user_case: "Buy order, falling tape, TWAP/VWAP beats IS"
+    visible_reasoning:
+      observation: "The stock fell after arrival, so later buy fills became cheaper."
+      driver: "Realized price drift favored slower execution."
+      effect: "TWAP and VWAP benefited from waiting; IS paid more because it bought earlier."
+      recommendation: "Do not call the slower algo universally better; call it a favorable tape outcome."
+    assistant: >
+      VWAP/TWAP looked better versus arrival because the stock declined through the window, making later buy
+      fills cheaper. IS underperformed because it front-loaded into higher early prices. This is not proof that
+      slow execution controlled risk; it reflects the realized tape. If beta or peer crowding suggests the decline
+      may reverse, prefer VWAP or capped POV rather than a very slow schedule.
+
+  - id: falling_sell_front_loaded_wins
+    user_case: "Sell order, falling price path, IS best"
+    visible_reasoning:
+      observation: "For a sell order, lower later prices are harmful."
+      driver: "Front-loading protected the arrival benchmark."
+      effect: "IS sold before the adverse decline; TWAP/VWAP sold more shares after prices fell."
+      recommendation: "Use IS when avoiding adverse downside move matters more than matching VWAP."
+    assistant: >
+      IS was the strongest schedule because the stock fell after arrival and the order was a sell. Earlier
+      fills preserved price before the decline, while TWAP and VWAP kept selling into weaker bars. VWAP may still
+      be the right choice for a benchmark-tracking mandate, but for arrival-cost protection the front-loaded
+      schedule is the cleaner recommendation.
+
+  - id: vwap_best_by_benchmark
+    user_case: "VWAP best by VWAP slippage, not best by arrival"
+    visible_reasoning:
+      observation: "The algo rankings differ by benchmark."
+      driver: "VWAP matched the volume curve while IS optimized timing."
+      effect: "VWAP wins against market VWAP; IS can still win arrival if the tape moved adversely."
+      recommendation: "Ask which benchmark matters before naming the winner."
+    assistant: >
+      VWAP is the best benchmark-tracking algo because its fill profile follows the market volume curve and stays
+      closest to full-session market VWAP. IS may show a better arrival-cost number if the stock moved adversely
+      after the open, but that is an urgency/timing advantage, not VWAP benchmark quality. If the execution mandate
+      is to minimize VWAP slippage, choose VWAP; if the mandate is arrival protection, choose the lower arrival-cost
+      schedule.
+
+  - id: strict_pov_unfilled
+    user_case: "Strict POV has good cost but leaves shares unfilled"
+    visible_reasoning:
+      observation: "POV respected the cap but did not complete the parent order."
+      driver: "Volume capacity was insufficient under the selected participation rate."
+      effect: "Reported slippage is only on completed shares; the unfilled remainder creates residual risk."
+      recommendation: "Do not rank POV as best unless completion risk is acceptable."
+    assistant: >
+      Strict POV controlled participation and avoided hidden cap violations, but it left shares unfilled. That
+      means its bps result is not directly comparable to fully completed schedules. If the desk must finish the
+      order, either use force-complete POV with explicit cap-violation risk or shift to VWAP/IS with a higher
+      accepted impact budget. If completion is optional, strict POV is defensible as the lowest-footprint choice.
+
+  - id: force_complete_pov_cap_violations
+    user_case: "Force-complete POV finishes but violates cap"
+    visible_reasoning:
+      observation: "The schedule completed by exceeding the requested participation cap."
+      driver: "Catch-up logic traded more shares in bars with limited volume."
+      effect: "Completion improved, but impact and market signaling risk increased."
+      recommendation: "Mention cap violations as the cost of certainty."
+    assistant: >
+      Force-complete POV achieved the parent quantity, but the completion came from explicit cap violations.
+      That is a real trade-off: it reduces residual shares but increases footprint in the bars where liquidity was
+      thin. If the order has to finish today, the approach is acceptable with the cap-violation caveat. If the goal
+      is low signaling and low impact, strict POV or a slower VWAP schedule is cleaner.
+
+  - id: high_spread_high_participation
+    user_case: "Aggressive algo has timing benefit but high spread/impact cost"
+    visible_reasoning:
+      observation: "The aggressive schedule traded high participation during wide high-low spread bars."
+      driver: "Spread proxy and impact penalty offset the price-path advantage."
+      effect: "An early algo can win arrival before costs but lose after spread/impact adjustments."
+      recommendation: "Separate timing alpha from liquidity friction."
+    assistant: >
+      The aggressive schedule benefited from trading earlier, but it also paid more liquidity friction because
+      participation was high during wider spread-proxy bars. The memo should separate those effects: timing helped,
+      while spread and impact hurt. If the expected-cost model shows spread/impact dominating timing risk, choose
+      VWAP or capped POV instead of maximum urgency.
+
+  - id: limit_price_partial_fill
+    user_case: "Limit price blocks fills"
+    visible_reasoning:
+      observation: "Some child orders were not executable under the limit."
+      driver: "The modeled fill price crossed the user limit."
+      effect: "Completion, not bps, becomes the binding constraint."
+      recommendation: "Compare completion-adjusted usefulness before selecting best algo."
+    assistant: >
+      The limit price protected execution quality but blocked fills once modeled prices moved outside the limit.
+      Algorithms with low slippage on a small executed quantity should not be treated as true winners. The practical
+      recommendation is to either loosen the limit, accept residual shares, or use a more urgent schedule earlier
+      when the limit is still feasible.
+
+  - id: beta_systematic_risk_high
+    user_case: "High market/sector beta and adverse index move"
+    visible_reasoning:
+      observation: "The stock moved with SPY/sector ETF and systematic risk dominated residual risk."
+      driver: "Waiting adds market and sector timing exposure."
+      effect: "Slow execution can be costly even if spread is low."
+      recommendation: "Prefer faster execution if market/sector move is adverse."
+    assistant: >
+      The beta map shows that broad market and sector movement explain a meaningful share of timing risk. Because
+      the stock is moving with the index/sector in an adverse direction for this order, waiting increases exposure
+      to systematic drift. A faster IS-style schedule or higher-urgency VWAP is justified unless the spread proxy
+      and participation impact are unusually high.
+
+  - id: idiosyncratic_risk_high
+    user_case: "Idiosyncratic risk dominates beta risk"
+    visible_reasoning:
+      observation: "Residual stock-specific risk is larger than market and sector timing risk."
+      driver: "The selected name is not being explained well by SPY or the sector ETF."
+      effect: "Index movement is less useful for predicting execution risk."
+      recommendation: "Lean on stock price path, peers, and liquidity rather than beta alone."
+    assistant: >
+      The risk decomposition is mostly idiosyncratic, so SPY and the mapped sector ETF do not fully explain the
+      move. In that case the recommendation should focus on the stock's own tape, peer confirmation, volume curve,
+      and spread/impact profile. If peers are not confirming the move, VWAP or capped POV is more defensible than
+      rushing purely because beta looks noisy.
+
+  - id: peer_crowding_adverse
+    user_case: "Peers highly correlated and moving adversely"
+    visible_reasoning:
+      observation: "Closest peers show high correlation and same-direction adverse moves."
+      driver: "Sector crowding increases timing and impact pressure."
+      effect: "Waiting may expose the order to continued peer-driven flow."
+      recommendation: "Favor faster execution or capped POV with a higher urgency setting."
+    assistant: >
+      Peer clustering supports a faster execution stance. The closest peers are correlated with the target and
+      moving in the same adverse direction, which suggests sector flow rather than an isolated print. That raises
+      the cost of waiting. Use IS or a higher-urgency VWAP if completion matters; use capped POV only if footprint
+      control matters more than timing risk.
+
+  - id: peer_divergence_slow_ok
+    user_case: "Peers weakly correlated or moving differently"
+    visible_reasoning:
+      observation: "Peer moves do not confirm the target move."
+      driver: "The move appears more stock-specific or noisy."
+      effect: "Urgency from sector crowding is lower."
+      recommendation: "Slower VWAP/TWAP or strict POV may be acceptable."
+    assistant: >
+      Peer evidence does not justify rushing. Correlations are weaker or peer moves diverge from the target, so
+      the tape looks more stock-specific than crowded sector flow. If spread and impact are meaningful, a slower
+      VWAP/TWAP schedule or strict POV can reduce footprint while accepting measured timing risk.
+
+  - id: late_volume_spike
+    user_case: "Late-day volume spike"
+    visible_reasoning:
+      observation: "The 21-day curve or current volume shows more liquidity later in the window."
+      driver: "VWAP defers more shares into liquid bars; TWAP ignores the liquidity shift."
+      effect: "VWAP can reduce participation pressure even if timing is not perfect."
+      recommendation: "Use VWAP when volume-curve fit matters more than arrival timing."
+    assistant: >
+      VWAP is attractive when liquidity is expected to concentrate later in the day. It can trade more shares when
+      market volume is naturally available, reducing participation pressure relative to TWAP. If the price path is
+      not strongly adverse, the liquidity benefit can outweigh the timing cost. If the tape is adverse, use an
+      urgency-adjusted VWAP rather than pure back-loaded execution.
+
+  - id: rising_day_close_benchmark
+    user_case: "Buy order judged against close"
+    visible_reasoning:
+      observation: "The stock closed above most fills."
+      driver: "Close benchmark rewards earlier fills on a rising buy tape."
+      effect: "Close slippage can look favorable even if VWAP slippage is not best."
+      recommendation: "Explain benchmark-specific interpretation."
+    assistant: >
+      Against the close benchmark, earlier buy fills look favorable because the stock closed higher than the
+      average execution price. That does not automatically mean the algo was best versus market VWAP or arrival.
+      The memo should name which benchmark the user cares about and avoid mixing close outperformance with VWAP
+      benchmark quality.
+
+  - id: flat_day_spread_dominates
+    user_case: "Flat price path, high spread, algo winner decided by liquidity cost"
+    visible_reasoning:
+      observation: "Price path did not create a large timing edge."
+      driver: "Spread proxy and participation impact dominate the small benchmark differences."
+      effect: "The smoother or lower-participation schedule wins because it pays less liquidity friction."
+      recommendation: "Choose VWAP/capped POV and do not overstate directional insight."
+    assistant: >
+      On a flat tape, the ranking is mostly about liquidity cost rather than directional timing. The best algo is
+      the one that keeps participation controlled and avoids paying spread/impact in concentrated bursts. VWAP or
+      capped POV is usually easier to defend here than IS, because there is little price-path benefit to justify
+      extra urgency.

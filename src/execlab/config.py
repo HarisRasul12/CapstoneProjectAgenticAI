@@ -17,6 +17,7 @@ class Settings:
     adk_enabled: bool
     require_adk_success: bool
     allow_transient_fallback: bool
+    adk_timeout_seconds: float
     data_provider: str
     yfinance_timeout_seconds: float
     historical_curve_lookback_days: int
@@ -71,6 +72,7 @@ def load_settings() -> Settings:
             os.getenv("EXECLAB_ALLOW_TRANSIENT_FALLBACK", "true"),
             default=True,
         ),
+        adk_timeout_seconds=float(os.getenv("EXECLAB_ADK_TIMEOUT_SECONDS", "300")),
         data_provider=os.getenv("EXECLAB_DATA_PROVIDER", "yfinance").strip().lower(),
         yfinance_timeout_seconds=float(os.getenv("EXECLAB_YFINANCE_TIMEOUT_SECONDS", "20")),
         historical_curve_lookback_days=int(os.getenv("EXECLAB_CURVE_LOOKBACK_DAYS", "21")),

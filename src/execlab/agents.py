@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from execlab.config import Settings
-from execlab.schemas import AgentStepReport, ExecutionMemo
+from execlab.schemas import AgentStepReport, CustomAlgoPlan, ExecutionMemo
 
 
 def adk_is_available() -> bool:
@@ -15,10 +17,24 @@ def adk_is_available() -> bool:
     return True
 
 
+def _load_few_shot_guidance() -> str:
+    path = Path(__file__).resolve().parent / "prompt" / "few_shots.yaml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return (
+            "Use visible analyst rationale: Observation -> Driver -> Effect -> Recommendation. "
+            "Do not expose hidden chain-of-thought."
+        )
+    # Keep the prompt bounded for latency while preserving the full style guide and many examples.
+    return text[:18_000]
+
+
 def create_execlab_root_agent(settings: Settings, model_name: str | None = None):
     from google.adk.agents import LlmAgent, SequentialAgent
 
     model = model_name or settings.vertex_model
+    few_shot_guidance = _load_few_shot_guidance()
 
     market_agent = LlmAgent(
         name="MarketDataAgent",
@@ -148,9 +164,9 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
     simulator_agent = LlmAgent(
         name="ExecutionSimulatorAgent",
         model=model,
-        description="Runs bar-based fill simulation.",
+        description="Explains bar-based fill simulation.",
         instruction=(
-            "Role: deterministic execution simulation controller.\n"
+            "Role: tool-grounded execution simulation analyst.\n"
             "Input: {execution_context}.\n"
             "Summarize modeled fills, unfilled quantities, limit-price blocks, and completion rates. "
             "Use only provided context."
@@ -184,11 +200,131 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
             "Input: {execution_context}.\n"
             "Write precise bullets explaining why one algo beat another: price-path timing, "
             "volume-curve fit, participation cap, spread/volatility friction, limit feasibility, "
-            "and beta/systematic-vs-idiosyncratic risk. Use only provided numbers."
+            "and beta/systematic-vs-idiosyncratic risk. Use only provided numbers.\n"
+            "Use this public reasoning format from the prompt asset. Do not expose hidden chain-of-thought:\n"
+            f"{few_shot_guidance[:5000]}"
         ),
         tools=[],
         output_schema=AgentStepReport,
         output_key="cause_effect_report",
+    )
+
+    fast_advocate_agent = LlmAgent(
+        name="FastExecutionAdvocate",
+        model=model,
+        description="Argues for front-loaded execution when timing risk dominates liquidity cost.",
+        instruction=(
+            "Role: execution debate advocate favoring faster execution.\n"
+            "Input: {execution_context}.\n"
+            "Make the strongest numeric case for IS/front-loaded or higher-urgency execution using "
+            "arrival cost, adverse price path, beta risk, peer crowding, and completion urgency. "
+            "Also state the spread/impact caveat."
+        ),
+        tools=[],
+        output_schema=AgentStepReport,
+        output_key="fast_execution_argument",
+    )
+
+    liquidity_advocate_agent = LlmAgent(
+        name="LiquiditySeekingAdvocate",
+        model=model,
+        description="Argues for VWAP/TWAP/POV when footprint control dominates timing risk.",
+        instruction=(
+            "Role: execution debate advocate favoring liquidity-seeking execution.\n"
+            "Input: {execution_context}.\n"
+            "Make the strongest numeric case for VWAP/TWAP/strict POV using spread proxy, "
+            "participation, volume curve fit, completion, and limit feasibility. "
+            "Also state the timing-risk caveat."
+        ),
+        tools=[],
+        output_schema=AgentStepReport,
+        output_key="liquidity_seeking_argument",
+    )
+
+    debate_judge_agent = LlmAgent(
+        name="DebateJudgeAgent",
+        model=model,
+        description="Judges the fast-vs-liquidity debate using tool-grounded report outputs.",
+        instruction=(
+            "Role: neutral execution debate judge.\n"
+            "Inputs: {execution_context}, {fast_execution_argument}, {liquidity_seeking_argument}.\n"
+            "Choose the stronger argument using the agent_debate report. Explain why "
+            "the recommended algo is robust or fragile. Use concise visible rationale only."
+        ),
+        tools=[],
+        output_schema=AgentStepReport,
+        output_key="debate_judge_report",
+    )
+
+    counterfactual_agent = LlmAgent(
+        name="CounterfactualAgent",
+        model=model,
+        description="Explains what assumptions would change the winning execution algorithm.",
+        instruction=(
+            "Role: counterfactual TCA analyst.\n"
+            "Input: {execution_context}.\n"
+            "Explain the counterfactual scenarios: flat tape, wider spread, larger order, adverse "
+            "peer crowding, and completion-adjusted view. State which assumptions change the winner "
+            "and what that means for robustness."
+        ),
+        tools=[],
+        output_schema=AgentStepReport,
+        output_key="counterfactual_report_agent",
+    )
+
+    playbook_agent = LlmAgent(
+        name="ExecutionPlaybookAgent",
+        model=model,
+        description="Turns the debate and counterfactual analysis into a desk-style execution plan.",
+        instruction=(
+            "Role: execution playbook writer.\n"
+            "Input: {execution_context}.\n"
+            "Summarize recommended algo, urgency, participation guidance, limit guidance, monitoring "
+            "triggers, and switch rules. Keep the guidance practical and caveated."
+        ),
+        tools=[],
+        output_schema=AgentStepReport,
+        output_key="playbook_report_agent",
+    )
+
+    custom_algo_agent = LlmAgent(
+        name="CustomAlgoDesignerAgent",
+        model=model,
+        description="Explains the generated custom hybrid algorithm and why its components fit the tape.",
+        instruction=(
+            "Role: custom execution algorithm designer.\n"
+            "Input: {execution_context}.\n"
+            "Read custom_algo_agent_plan as the agent-authored translation of the user's desk brief. "
+            "Explain how the design responds to urgency, max participation, completion-by-time target, "
+            "PM exposure, risk constraints, and limit guidance when those are present. Explain the "
+            "custom_algo section: name, style, component weights, adaptive participation cap, modeled arrival cost, "
+            "completion, cap violations, and why this hybrid would fit the selected volume curve, "
+            "spread proxy, beta risk, peer crowding, and debate result. Keep it clear that "
+            "this is an educational bar-based strategy, not production routing. Return status='ok' and "
+            "3-5 highlights using visible analyst reasoning: observation, driver, implication."
+        ),
+        tools=[],
+        output_schema=AgentStepReport,
+        output_key="custom_algo_designer_report",
+    )
+
+    tab_insight_agent = LlmAgent(
+        name="TabInsightAgent",
+        model=model,
+        description="Summarizes the data-driven insight cards rendered in every Streamlit tab.",
+        instruction=(
+            "Role: dashboard insight narrator.\n"
+            "Input: {execution_context}.\n"
+            "Read the market, pretrade, expected_cost_model, beta_risk, peer_analysis, causal_tca, "
+            "agent_debate, custom_algo, algo_metrics, and scenario_results sections directly. "
+            "Do not rely on any prewritten insight report. Generate fresh dashboard commentary for "
+            "Pre-Trade Lab, Risk Model, Peers, Custom Algo, regular TCA, Scenario Lab, and Agent Memo. "
+            "Use concise visible analyst rationale only. Return status='ok' and 3-5 highlights that "
+            "explain why the tabs matter for an execution decision."
+        ),
+        tools=[],
+        output_schema=AgentStepReport,
+        output_key="tab_insight_report_agent",
     )
 
     limit_agent = LlmAgent(
@@ -215,16 +351,17 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
             "Inputs: {execution_context}, {market_data_report}, {volume_curve_report}, "
             "{pretrade_report_agent}, {expected_cost_report_agent}, {historical_regression_report}, "
             "{beta_risk_report_agent}, {peer_cluster_report_agent}, {strategy_report}, "
-            "{simulation_report}, {tca_report}, {cause_effect_report}, {limit_feasibility_report}.\n"
-            "Few-shot style target:\n"
-            "Example 1: 'The stock moved upward after the open, so the front-loaded IS schedule "
-            "benefited from trading earlier. VWAP stayed closest to market VWAP because it tracked "
-            "the volume curve. TWAP lagged because it kept trading into higher prices.'\n"
-            "Example 2: 'On a falling tape, slower schedules can look better versus arrival, but "
-            "that does not mean they controlled risk; it reflects the realized price path.'\n"
+            "{simulation_report}, {tca_report}, {cause_effect_report}, {fast_execution_argument}, "
+            "{liquidity_seeking_argument}, {debate_judge_report}, {counterfactual_report_agent}, "
+            "{playbook_report_agent}, {custom_algo_designer_report}, {tab_insight_report_agent}, "
+            "{limit_feasibility_report}.\n"
+            "Few-shot guidance and public reasoning examples:\n"
+            f"{few_shot_guidance}\n"
             "Return ExecutionMemo. Include a clear recommendation on algo choice, spread/impact "
             "settings, beta/systematic risk versus idiosyncratic timing risk, strict POV/limit "
-            "behavior, and the OMS/EMS limitation exactly once."
+            "behavior, whether the custom hybrid improves the desk recommendation, and the "
+            "OMS/EMS limitation exactly once. Use concise visible rationale, "
+            "not hidden chain-of-thought."
         ),
         tools=[],
         output_schema=ExecutionMemo,
@@ -240,8 +377,8 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
             "Inputs: {execution_context} and {execution_memo_draft}.\n"
             "Return a final ExecutionMemo that is numeric, plain-English, explicitly caveated, "
             "and directly answers how to execute. Do not invent values. Recommend whether to "
-            "prefer TWAP, VWAP, POV, or IS and explain the spread, impact, market beta, "
-            "and idiosyncratic timing-risk tradeoff."
+            "prefer TWAP, VWAP, POV, IS, or the custom hybrid as a research idea, and explain "
+            "the spread, impact, market beta, and idiosyncratic timing-risk tradeoff."
         ),
         tools=[],
         output_schema=ExecutionMemo,
@@ -262,8 +399,46 @@ def create_execlab_root_agent(settings: Settings, model_name: str | None = None)
             simulator_agent,
             benchmark_agent,
             cause_effect_agent,
+            fast_advocate_agent,
+            liquidity_advocate_agent,
+            debate_judge_agent,
+            counterfactual_agent,
+            playbook_agent,
+            custom_algo_agent,
+            tab_insight_agent,
             limit_agent,
             narrative_agent,
             critic_agent,
         ],
+    )
+
+
+def create_custom_algo_planner_agent(settings: Settings, model_name: str | None = None):
+    from google.adk.agents import LlmAgent
+
+    model = model_name or settings.vertex_model
+    return LlmAgent(
+        name="CustomAlgoPlannerAgent",
+        model=model,
+        description="Turns a trader's custom algo chat brief into a structured execution plan.",
+        instruction=(
+            "Role: custom execution algorithm planner.\n"
+            "Inputs: {request}, {custom_planner_context}.\n"
+            "Interpret the user's desk brief as execution constraints. Extract only what is "
+            "supported by the user's words and the provided market context. Return CustomAlgoPlan.\n"
+            "Guidelines:\n"
+            "- If the user specifies a max participation cap, set max_participation_rate as a decimal.\n"
+            "- If the user says a percent must be done by a time, set completion_target_pct and "
+            "completion_target_time in HH:MM 24-hour market time.\n"
+            "- Use urgency_score for PM exposure, adverse tape, must-complete, or risk-reduction needs.\n"
+            "- Use liquidity_score for minimize-impact, low-footprint, no-chase, or strict-cap needs.\n"
+            "- component_weights may include vwap_curve, is_urgency, pov_guardrail, twap_stabilizer; "
+            "weights should be positive and roughly sum to 1.\n"
+            "- If a brief is ambiguous, still provide a usable educational plan and put clarifying "
+            "items in follow_up_questions.\n"
+            "- Do not reveal hidden chain-of-thought; rationale should be concise visible analyst bullets."
+        ),
+        tools=[],
+        output_schema=CustomAlgoPlan,
+        output_key="custom_algo_plan",
     )

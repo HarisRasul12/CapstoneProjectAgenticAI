@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from html import escape
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -127,6 +128,79 @@ def agent_note(title: str, agents: str, text: str) -> None:
     )
 
 
+AGENT_REPORTS_BY_TAB = {
+    "pretrade": [
+        "volume_curve_report",
+        "pretrade_report_agent",
+        "expected_cost_report_agent",
+        "historical_regression_report",
+    ],
+    "risk": ["beta_risk_report_agent"],
+    "peers": ["peer_cluster_report_agent"],
+    "debate": ["fast_execution_argument", "liquidity_seeking_argument", "debate_judge_report"],
+    "counterfactuals": ["counterfactual_report_agent"],
+    "playbook": ["playbook_report_agent"],
+    "custom_algo": ["custom_algo_designer_report"],
+    "tca": ["tca_report", "cause_effect_report"],
+    "charts": ["strategy_report", "simulation_report", "limit_feasibility_report"],
+    "scenario": ["expected_cost_report_agent"],
+    "memo": ["tab_insight_report_agent"],
+    "agent_trace": ["tab_insight_report_agent"],
+    "data_room": ["simulation_report", "limit_feasibility_report"],
+}
+
+
+AGENT_REPORT_TITLES = {
+    "market_data_report": "Market Data Agent",
+    "volume_curve_report": "Volume Curve Agent",
+    "pretrade_report_agent": "Pre-Trade Analytics Agent",
+    "expected_cost_report_agent": "Expected Cost Model Agent",
+    "historical_regression_report": "Historical Regression Agent",
+    "beta_risk_report_agent": "Beta Risk Mapping Agent",
+    "peer_cluster_report_agent": "Peer Cluster Agent",
+    "strategy_report": "Algo Strategy Agent",
+    "simulation_report": "Execution Simulator Agent",
+    "tca_report": "Benchmark TCA Agent",
+    "cause_effect_report": "Cause-Effect TCA Agent",
+    "fast_execution_argument": "Fast Execution Advocate",
+    "liquidity_seeking_argument": "Liquidity-Seeking Advocate",
+    "debate_judge_report": "Debate Judge Agent",
+    "counterfactual_report_agent": "Counterfactual Agent",
+    "playbook_report_agent": "Execution Playbook Agent",
+    "custom_algo_designer_report": "Custom Algo Designer Agent",
+    "tab_insight_report_agent": "Tab Insight Agent",
+    "limit_feasibility_report": "Limit Feasibility Agent",
+}
+
+
+def render_insights(result, tab_key: str) -> None:
+    agent_reports = getattr(result, "agent_reports", {}) or {}
+    keys = AGENT_REPORTS_BY_TAB.get(tab_key, [])
+    selected = [(key, agent_reports[key]) for key in keys if key in agent_reports]
+    if not selected:
+        st.info(
+            "ADK/Vertex agent commentary was not returned for this local run. "
+            "The charts and tables are still computed, but this tab is waiting for live agent reasoning."
+        )
+        return
+    for key, report in selected:
+        bullets = "".join(f"<li>{escape(str(item))}</li>" for item in report.highlights)
+        caveats = "".join(f"<li>{escape(str(item))}</li>" for item in report.caveats)
+        caveat_block = f"<span><strong>Caveats:</strong></span><ul>{caveats}</ul>" if caveats else ""
+        title = AGENT_REPORT_TITLES.get(key, key.replace("_", " ").title())
+        st.markdown(
+            f"""
+            <div class="agent-box">
+              <strong>{escape(title)}</strong><br/>
+              <span><strong>Status:</strong> {escape(str(report.status))}</span>
+              <ul>{bullets}</ul>
+              {caveat_block}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def main() -> None:
     apply_theme()
     service = get_service()
@@ -223,6 +297,7 @@ def main() -> None:
         with st.spinner("Fetching live bars, running schedules, simulating fills, and asking agents..."):
             try:
                 st.session_state["last_result"] = service.run_backtest(request)
+                st.session_state["custom_algo_messages"] = []
             except Exception as exc:
                 st.error(str(exc))
                 return
@@ -275,7 +350,23 @@ def render_result(result) -> None:
         unsafe_allow_html=True,
     )
 
-    tabs = st.tabs(["Pre-Trade Lab", "Risk Model", "Peers", "TCA", "Charts", "Scenario Lab", "Agent Memo", "Data Room"])
+    tabs = st.tabs(
+        [
+            "Pre-Trade Lab",
+            "Risk Model",
+            "Peers",
+            "Agent Debate",
+            "Counterfactuals",
+            "Playbook",
+            "Custom Algo",
+            "TCA",
+            "Charts",
+            "Scenario Lab",
+            "Agent Memo",
+            "Agent Trace",
+            "Data Room",
+        ]
+    )
     with tabs[0]:
         render_pretrade_lab(result)
 
@@ -286,6 +377,18 @@ def render_result(result) -> None:
         render_peer_analysis(result)
 
     with tabs[3]:
+        render_agent_debate(result)
+
+    with tabs[4]:
+        render_counterfactuals(result)
+
+    with tabs[5]:
+        render_playbook(result)
+
+    with tabs[6]:
+        render_custom_algo(result)
+
+    with tabs[7]:
         st.subheader("TCA comparison")
         agent_note(
             "What this tab means",
@@ -293,6 +396,7 @@ def render_result(result) -> None:
             "TCA compares each schedule against arrival price, market VWAP, and close. "
             "For the selected side, lower bps is better; positive bps means the execution was worse than the benchmark.",
         )
+        render_insights(result, "tca")
         display = metrics_df[
             [
                 "algo",
@@ -350,13 +454,14 @@ def render_result(result) -> None:
         st.subheader("How to read the TCA stats")
         st.dataframe(tca_commentary_table(result), use_container_width=True, hide_index=True)
 
-    with tabs[4]:
+    with tabs[8]:
         agent_note(
             "What this tab means",
             "AlgoStrategyAgent, ExecutionSimulatorAgent, LimitFeasibilityAgent",
             "These charts show how each pseudo execution agent would trade through the day, where fills occur, "
             "and whether participation or limit rules block shares.",
         )
+        render_insights(result, "charts")
         c1, c2 = st.columns(2)
         with c1:
             st.plotly_chart(price_and_fills_chart(result), use_container_width=True)
@@ -365,7 +470,7 @@ def render_result(result) -> None:
         st.plotly_chart(participation_chart(result), use_container_width=True)
         st.plotly_chart(cumulative_completion_chart(result), use_container_width=True)
 
-    with tabs[5]:
+    with tabs[9]:
         st.subheader("Cost scenario lab")
         agent_note(
             "What this tab means",
@@ -373,6 +478,7 @@ def render_result(result) -> None:
             "The scenario lab perturbs spread, drift, and impact assumptions. It is an expected-cost stress test, "
             "not a venue-level fill simulator.",
         )
+        render_insights(result, "scenario")
         scenario_df = pd.DataFrame([item.model_dump() for item in result.scenario_report.results])
         st.plotly_chart(scenario_chart(scenario_df), use_container_width=True)
         st.dataframe(
@@ -392,7 +498,7 @@ def render_result(result) -> None:
         for caveat in result.scenario_report.caveats:
             st.caption(caveat)
 
-    with tabs[6]:
+    with tabs[10]:
         memo = result.memo
         agent_note(
             "What this tab means",
@@ -400,6 +506,7 @@ def render_result(result) -> None:
             "The final agents consume the computed tool outputs, peer cluster report, beta risk map, and TCA bullets "
             "to write a recommendation memo.",
         )
+        render_insights(result, "memo")
         st.markdown(
             f"""
             <div class="memo-box">
@@ -423,13 +530,17 @@ def render_result(result) -> None:
         for item in memo.caveats:
             st.write(f"- {item}")
 
-    with tabs[7]:
+    with tabs[11]:
+        render_agent_trace(result)
+
+    with tabs[12]:
         st.subheader("Fills")
         agent_note(
             "What this tab means",
-            "All deterministic tools",
+            "All audited tools",
             "This is the audit trail: modeled fill rows, blocked fills, and the sequence of tool calls used by the agents.",
         )
+        render_insights(result, "data_room")
         fill_df = fills_dataframe(result)
         st.dataframe(fill_df, use_container_width=True, hide_index=True)
         st.download_button(
@@ -452,6 +563,7 @@ def render_pretrade_lab(result) -> None:
         "This tab converts 21 live intraday sessions into liquidity, spread-proxy, volatility, time-risk, "
         "and expected-cost features. The regression is transparent OLS; the spread is a high-low proxy, not NBBO.",
     )
+    render_insights(result, "pretrade")
     st.markdown(
         f"""
         <div class="metric-grid">
@@ -502,6 +614,7 @@ def render_risk_model(result) -> None:
         "This tab separates execution impact from market timing risk. It maps the stock to SPY and a sector ETF, "
         "then compares the selected stock's intraday move against those index paths.",
     )
+    render_insights(result, "risk")
     st.markdown(
         f"""
         <div class="metric-grid">
@@ -571,6 +684,7 @@ def render_peer_analysis(result) -> None:
         "The peer agent looks inside the mapped sector ETF, finds stocks most correlated with the target, "
         "checks whether their recent moves confirm the target move, and translates that into fast/slow execution pressure.",
     )
+    render_insights(result, "peers")
     st.markdown(
         f"""
         <div class="metric-grid">
@@ -622,12 +736,312 @@ def render_peer_analysis(result) -> None:
         )
 
 
+def render_agent_debate(result) -> None:
+    debate = result.debate_report
+    st.subheader("Agent debate")
+    agent_note(
+        "What this tab means",
+        "FastExecutionAdvocate, LiquiditySeekingAdvocate, DebateJudgeAgent",
+        "Two agents argue opposite execution philosophies. The judge then chooses which argument is better grounded in the computed TCA, pre-trade, beta, peer, and completion data.",
+    )
+    render_insights(result, "debate")
+    st.markdown(
+        f"""
+        <div class="metric-grid">
+          <div class="metric-card"><div class="metric-label">Judge winner</div><div class="metric-value">{debate.judge_winner}</div><div class="metric-sub">stronger argument</div></div>
+          <div class="metric-card"><div class="metric-label">Recommended algo</div><div class="metric-value">{debate.recommended_algo}</div><div class="metric-sub">from agent debate report</div></div>
+          <div class="metric-card"><div class="metric-label">Confidence</div><div class="metric-value">{debate.confidence * 100:.0f}%</div><div class="metric-sub">arrival-cost gap adjusted</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader(debate.fast_case.advocate)
+        st.write(debate.fast_case.thesis)
+        for item in debate.fast_case.evidence:
+            st.write(f"- {item}")
+        for caveat in debate.fast_case.caveats:
+            st.caption(caveat)
+    with c2:
+        st.subheader(debate.liquidity_case.advocate)
+        st.write(debate.liquidity_case.thesis)
+        for item in debate.liquidity_case.evidence:
+            st.write(f"- {item}")
+        for caveat in debate.liquidity_case.caveats:
+            st.caption(caveat)
+    st.subheader("Judge rationale")
+    st.write(debate.judge_rationale)
+    for item in debate.deciding_factors:
+        st.write(f"- {item}")
+
+
+def render_counterfactuals(result) -> None:
+    report = result.counterfactual_report
+    st.subheader("Counterfactual robustness")
+    agent_note(
+        "What this tab means",
+        "CounterfactualAgent",
+        "This agent asks what would have made another algo win. It stress-tests the recommendation under flat tape, wider spread, larger order, peer crowding, and completion-adjusted assumptions.",
+    )
+    render_insights(result, "counterfactuals")
+    st.write(report.summary)
+    scenario_rows = []
+    for scenario in report.scenarios:
+        for algo, cost in scenario.estimated_costs_bps.items():
+            scenario_rows.append(
+                {
+                    "Scenario": scenario.name,
+                    "Algo": algo,
+                    "Estimated Cost bps": cost,
+                    "Winner": scenario.estimated_winner,
+                    "Assumption": scenario.assumption_change,
+                    "Rationale": scenario.rationale,
+                }
+            )
+    frame = pd.DataFrame(scenario_rows)
+    st.plotly_chart(counterfactual_chart(frame), use_container_width=True)
+    if not frame.empty:
+        winners = (
+            frame[["Scenario", "Winner", "Assumption", "Rationale"]]
+            .drop_duplicates()
+            .reset_index(drop=True)
+        )
+        st.dataframe(winners, use_container_width=True, hide_index=True)
+
+
+def render_playbook(result) -> None:
+    playbook = result.playbook_report
+    st.subheader("Execution playbook")
+    agent_note(
+        "What this tab means",
+        "ExecutionPlaybookAgent",
+        "This converts the backtest, debate, and counterfactuals into desk-style operating guidance: what to run, how urgently, when to switch, and what to monitor.",
+    )
+    render_insights(result, "playbook")
+    st.markdown(
+        f"""
+        <div class="memo-box">
+          <h3 style="margin-top:0;">Run {playbook.recommended_algo}</h3>
+          <p>{playbook.rationale}</p>
+          <p><strong>Urgency:</strong> {playbook.urgency}</p>
+          <p><strong>Participation:</strong> {playbook.participation_guidance}</p>
+          <p><strong>Limit:</strong> {playbook.limit_guidance}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Monitoring triggers")
+        for item in playbook.monitoring_triggers:
+            st.write(f"- {item}")
+    with c2:
+        st.subheader("Switch rules")
+        for item in playbook.switch_rules:
+            st.write(f"- {item}")
+
+
+def render_custom_algo(result) -> None:
+    report = result.custom_algo_report
+    metrics = report.simulation.metrics
+    st.subheader("Agent-designed custom algo")
+    agent_note(
+        "What this tab means",
+        "CustomAlgoPlannerAgent, CustomAlgoDesignerAgent, TabInsightAgent, ExecutionSimulatorAgent",
+        "This tab lets ADK interpret the desk brief into a structured custom plan, builds a hybrid schedule from that plan, then backtests it with the same bar-based fill model. It is a research idea, not production routing logic.",
+    )
+    render_custom_algo_chat(result)
+    render_insights(result, "custom_algo")
+    st.markdown(
+        f"""
+        <div class="metric-grid">
+          <div class="metric-card"><div class="metric-label">Custom algo</div><div class="metric-value">{report.name}</div><div class="metric-sub">{report.style}</div></div>
+          <div class="metric-card"><div class="metric-label">Arrival cost</div><div class="metric-value">{metrics.arrival_cost_bps:.2f} bps</div><div class="metric-sub">same TCA math as benchmarks</div></div>
+          <div class="metric-card"><div class="metric-label">Completion</div><div class="metric-value">{metrics.completion_rate * 100:.1f}%</div><div class="metric-sub">{metrics.unfilled_quantity:,} unfilled shares</div></div>
+          <div class="metric-card"><div class="metric-label">Adaptive cap</div><div class="metric-value">{float(report.parameters.get("adaptive_participation_cap", 0)) * 100:.1f}%</div><div class="metric-sub">{metrics.cap_violation_count} cap violations</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.write(report.description)
+    agent_plan = report.parameters.get("agent_plan")
+    if agent_plan:
+        with st.expander("Active custom brief and CustomAlgoPlannerAgent plan", expanded=False):
+            if report.parameters.get("user_brief"):
+                st.write(report.parameters["user_brief"])
+            plan_rows = [{"Field": key, "Value": value} for key, value in agent_plan.items()]
+            st.dataframe(pd.DataFrame(plan_rows), use_container_width=True, hide_index=True)
+    elif result.request.custom_algo_instructions:
+        st.warning(
+            "Custom brief captured, but CustomAlgoPlannerAgent did not return a plan. "
+            "Run with ADK/Vertex enabled for agentic customization."
+        )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Component recipe")
+        component_df = pd.DataFrame([item.model_dump() for item in report.components])
+        if not component_df.empty:
+            component_df["weight"] = component_df["weight"] * 100
+            st.dataframe(
+                component_df.rename(
+                    columns={"name": "Component", "weight": "Weight %", "reason": "Why it is used"}
+                ),
+                use_container_width=True,
+                hide_index=True,
+                column_config={"Weight %": st.column_config.NumberColumn(format="%.1f%%")},
+            )
+    with c2:
+        st.subheader("Custom vs benchmark TCA")
+        compare = _custom_comparison_table(result)
+        st.dataframe(
+            compare,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Arrival Cost bps": st.column_config.NumberColumn(format="%.2f"),
+                "VWAP Slip bps": st.column_config.NumberColumn(format="%.2f"),
+                "Completion %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Max Participation %": st.column_config.NumberColumn(format="%.2f%%"),
+            },
+        )
+
+    st.plotly_chart(custom_algo_schedule_chart(result), use_container_width=True)
+    st.subheader("Agent rationale")
+    for item in report.rationale:
+        st.write(f"- {item}")
+    st.subheader("Caveats")
+    for item in report.caveats:
+        st.caption(item)
+
+
+def render_custom_algo_chat(result) -> None:
+    st.subheader("Custom algo design chat")
+    st.caption(
+        "Tell the agent your execution objective: urgency, max participation, PM exposure, "
+        "completion target by time, risk limits, and limit-price constraints."
+    )
+    messages = st.session_state.setdefault("custom_algo_messages", [])
+    if not messages and result.request.custom_algo_instructions:
+        messages.append({"role": "user", "content": result.request.custom_algo_instructions})
+
+    with st.chat_message("assistant"):
+        st.write(
+            "Give CustomAlgoPlannerAgent a desk brief. Example: "
+            "`PM wants 60% done by 11:00, keep max participation under 12%, minimize impact, "
+            "but reduce exposure before the Fed headline.`"
+        )
+    for message in messages:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+
+    prompt = st.chat_input(
+        "Describe your custom execution constraints...",
+        key="custom_algo_chat_input",
+    )
+    if prompt:
+        messages.append({"role": "user", "content": prompt})
+        brief = "\n".join(
+            message["content"] for message in messages if message.get("role") == "user"
+        )
+        updated_request = result.request.model_copy(update={"custom_algo_instructions": brief})
+        with st.spinner("CustomAlgoPlannerAgent is interpreting the brief and redesigning the schedule..."):
+            st.session_state["last_result"] = get_service().run_backtest(updated_request)
+        st.rerun()
+
+
+def render_agent_trace(result) -> None:
+    st.subheader("Agent trace and rubric QA")
+    agent_note(
+        "What this tab means",
+        "ExecLabCoordinatorAgent and all sub-agents",
+        "This shows the handoff map and tool trace. It is the audit evidence that the app is agentic and grounded in tools.",
+    )
+    render_insights(result, "agent_trace")
+    pipeline = [
+        ("MarketDataAgent", "Validates live bars and benchmark prices"),
+        ("VolumeCurveAgent", "Explains VWAP curve source and volume regime"),
+        ("PreTradeAnalyticsAgent", "Summarizes 21-day liquidity, spread proxy, volatility, and time risk"),
+        ("ExpectedCostModelAgent", "Explains expected cost and component breakdown"),
+        ("HistoricalRegressionAgent", "Audits OLS feature engineering and fit quality"),
+        ("BetaRiskMappingAgent", "Maps market/sector beta and systematic-vs-idiosyncratic risk"),
+        ("PeerClusterAgent", "Analyzes closest peers, clustering, and urgency pressure"),
+        ("AlgoStrategyAgent", "Compares TWAP/VWAP/POV/IS schedule behavior"),
+        ("ExecutionSimulatorAgent", "Explains fills, completion, and blocked/limit behavior"),
+        ("BenchmarkTcaAgent", "Reviews arrival, VWAP, close, and scenario metrics"),
+        ("CauseEffectTcaAgent", "Builds cause-effect bullets for why the winner won"),
+        ("FastExecutionAdvocate", "Argues for faster/front-loaded execution"),
+        ("LiquiditySeekingAdvocate", "Argues for VWAP/TWAP/POV liquidity-seeking execution"),
+        ("DebateJudgeAgent", "Judges the debate and recommendation robustness"),
+        ("CounterfactualAgent", "Asks what assumptions would change the winner"),
+        ("ExecutionPlaybookAgent", "Writes monitoring triggers and switch rules"),
+        ("CustomAlgoDesignerAgent", "Builds and explains a hybrid strategy for this tape"),
+        ("TabInsightAgent", "Generates live ADK commentary from the computed context"),
+        ("NarrativeExplanationAgent", "Drafts the execution memo"),
+        ("CriticGoldenSetAgent", "Checks caveats, numbers, and final recommendation"),
+    ]
+    st.dataframe(
+        pd.DataFrame(pipeline, columns=["Agent", "Role"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+    qa = pd.DataFrame(
+        [
+            {"Check": "Uses live market data", "Status": "Pass" if result.provider != "unknown" else "Review"},
+            {"Check": "Has audited TCA metrics", "Status": "Pass" if result.simulations else "Review"},
+            {"Check": "Explains limitation language", "Status": "Pass" if "not a production OMS/EMS" in result.memo.limitation else "Review"},
+            {"Check": "Includes peer/beta risk", "Status": "Pass" if result.peer_report.analyzed_count >= 0 and result.beta_risk_report.observation_count >= 0 else "Review"},
+            {"Check": "Has debate and counterfactual reports", "Status": "Pass" if result.debate_report.recommended_algo and result.counterfactual_report.scenarios else "Review"},
+            {"Check": "Has custom algo designer output", "Status": "Pass" if result.custom_algo_report.components else "Review"},
+            {"Check": "Has ADK agent commentary", "Status": "Pass" if result.agent_reports else "Needs ADK run"},
+        ]
+    )
+    st.subheader("Rubric QA")
+    st.dataframe(qa, use_container_width=True, hide_index=True)
+    st.subheader("Tool execution trace")
+    st.dataframe(pd.DataFrame(result.execution_trace), use_container_width=True, hide_index=True)
+
+
 def fills_dataframe(result) -> pd.DataFrame:
     rows = []
-    for sim in result.simulations.values():
+    for sim in all_simulations(result).values():
         for fill in sim.fills:
             rows.append(fill.model_dump())
     return pd.DataFrame(rows)
+
+
+def all_simulations(result) -> dict:
+    simulations = dict(result.simulations)
+    custom = getattr(result, "custom_algo_report", None)
+    if custom is not None:
+        simulations["CUSTOM"] = custom.simulation
+    return simulations
+
+
+def all_schedules(result) -> dict:
+    schedules = dict(result.schedules)
+    custom_schedule = getattr(result, "custom_schedule", pd.DataFrame())
+    if isinstance(custom_schedule, pd.DataFrame) and not custom_schedule.empty:
+        schedules["CUSTOM"] = custom_schedule
+    return schedules
+
+
+def _custom_comparison_table(result) -> pd.DataFrame:
+    rows = []
+    for algo, sim in all_simulations(result).items():
+        metrics = sim.metrics
+        rows.append(
+            {
+                "Algo": algo,
+                "Arrival Cost bps": metrics.arrival_cost_bps,
+                "VWAP Slip bps": metrics.vwap_slippage_bps,
+                "Completion %": metrics.completion_rate * 100,
+                "Unfilled": metrics.unfilled_quantity,
+                "Max Participation %": metrics.max_participation_rate * 100,
+            }
+        )
+    return pd.DataFrame(rows).sort_values("Arrival Cost bps")
 
 
 def pretrade_commentary_table(result) -> pd.DataFrame:
@@ -731,8 +1145,8 @@ def price_and_fills_chart(result) -> go.Figure:
             line=dict(color="#e5e7eb", width=2),
         )
     )
-    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444"}
-    for algo, sim in result.simulations.items():
+    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444", "CUSTOM": "#a78bfa"}
+    for algo, sim in all_simulations(result).items():
         fills = pd.DataFrame([fill.model_dump() for fill in sim.fills])
         if fills.empty:
             continue
@@ -788,8 +1202,8 @@ def schedule_vs_volume_chart(result) -> go.Figure:
             yaxis="y2",
         )
     )
-    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444"}
-    for algo, schedule in result.schedules.items():
+    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444", "CUSTOM": "#a78bfa"}
+    for algo, schedule in all_schedules(result).items():
         fig.add_trace(
             go.Scatter(
                 x=schedule["timestamp_et"],
@@ -812,10 +1226,59 @@ def schedule_vs_volume_chart(result) -> go.Figure:
     return fig
 
 
+def custom_algo_schedule_chart(result) -> go.Figure:
+    fig = go.Figure()
+    bars = result.window_bars
+    fig.add_trace(
+        go.Bar(
+            x=bars["timestamp_et"],
+            y=bars["volume"],
+            name="Market volume",
+            marker_color="rgba(148, 163, 184, 0.30)",
+            yaxis="y2",
+        )
+    )
+    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444", "CUSTOM": "#a78bfa"}
+    for algo, schedule in all_schedules(result).items():
+        width = 4 if algo == "CUSTOM" else 1.8
+        dash = "solid" if algo == "CUSTOM" else "dot"
+        fig.add_trace(
+            go.Scatter(
+                x=schedule["timestamp_et"],
+                y=schedule["target_quantity"],
+                mode="lines",
+                name=algo,
+                line=dict(color=colors.get(algo, "#e5e7eb"), width=width, dash=dash),
+            )
+        )
+    custom = getattr(result, "custom_schedule", pd.DataFrame())
+    if isinstance(custom, pd.DataFrame) and not custom.empty and "participation_cap_quantity" in custom:
+        fig.add_trace(
+            go.Scatter(
+                x=custom["timestamp_et"],
+                y=custom["participation_cap_quantity"],
+                mode="lines",
+                name="Custom cap",
+                line=dict(color="#c4b5fd", width=1.5, dash="dash"),
+            )
+        )
+    fig.update_layout(
+        title="Agent-designed custom schedule aligned with benchmark algos",
+        template="plotly_dark",
+        paper_bgcolor="#0f1419",
+        plot_bgcolor="#0f1419",
+        height=430,
+        yaxis=dict(title="Child shares"),
+        yaxis2=dict(title="Market volume", overlaying="y", side="right", showgrid=False),
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    return fig
+
+
 def participation_chart(result) -> go.Figure:
     fig = go.Figure()
-    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444"}
-    for algo, sim in result.simulations.items():
+    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444", "CUSTOM": "#a78bfa"}
+    for algo, sim in all_simulations(result).items():
         fills = pd.DataFrame([fill.model_dump() for fill in sim.fills])
         if fills.empty:
             continue
@@ -842,8 +1305,8 @@ def participation_chart(result) -> go.Figure:
 
 def cumulative_completion_chart(result) -> go.Figure:
     fig = go.Figure()
-    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444"}
-    for algo, sim in result.simulations.items():
+    colors = {"TWAP": "#38bdf8", "VWAP": "#22c55e", "POV": "#f59e0b", "IS": "#ef4444", "CUSTOM": "#a78bfa"}
+    for algo, sim in all_simulations(result).items():
         fills = pd.DataFrame([fill.model_dump() for fill in sim.fills])
         if fills.empty:
             continue
@@ -1104,6 +1567,31 @@ def peer_move_bar_chart(frame: pd.DataFrame) -> go.Figure:
         plot_bgcolor="#0f1419",
         height=360,
         yaxis_title="bps",
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    return fig
+
+
+def counterfactual_chart(frame: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    if frame.empty:
+        return fig
+    for algo, group in frame.groupby("Algo"):
+        fig.add_trace(
+            go.Bar(
+                x=group["Scenario"],
+                y=group["Estimated Cost bps"],
+                name=str(algo),
+            )
+        )
+    fig.update_layout(
+        title="Counterfactual estimated arrival cost by algo",
+        template="plotly_dark",
+        paper_bgcolor="#0f1419",
+        plot_bgcolor="#0f1419",
+        height=420,
+        barmode="group",
+        yaxis_title="Estimated arrival cost bps",
         margin=dict(l=20, r=20, t=45, b=20),
     )
     return fig

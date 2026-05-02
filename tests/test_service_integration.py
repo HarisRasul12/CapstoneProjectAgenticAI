@@ -29,6 +29,12 @@ def test_service_returns_complete_backtest_with_mocked_live_provider() -> None:
     assert result.beta_risk_report.index_comparison
     assert result.peer_report.analyzed_count > 0
     assert result.causal_report.bullets
+    assert result.debate_report.recommended_algo in result.simulations
+    assert len(result.counterfactual_report.scenarios) >= 5
+    assert result.playbook_report.recommended_algo in result.simulations
+    assert result.custom_algo_report.components
+    assert result.custom_algo_report.simulation.metrics.total_quantity_targeted == request.quantity
+    assert not result.agent_reports
 
 
 def test_strict_adk_unavailable_path_returns_labeled_fallback(monkeypatch) -> None:
@@ -59,6 +65,7 @@ def _settings(adk_enabled: bool, require_adk_success: bool) -> Settings:
         adk_enabled=adk_enabled,
         require_adk_success=require_adk_success,
         allow_transient_fallback=True,
+        adk_timeout_seconds=300,
         data_provider="yfinance",
         yfinance_timeout_seconds=5,
         historical_curve_lookback_days=3,

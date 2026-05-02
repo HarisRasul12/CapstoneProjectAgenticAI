@@ -9,11 +9,15 @@ from uuid import uuid4
 
 import pandas as pd
 
-from execlab.agents import adk_is_available, create_execlab_root_agent
+from execlab.agents import adk_is_available, create_custom_algo_planner_agent, create_execlab_root_agent
+from execlab.agentic_reports import build_counterfactual_report as make_counterfactual_report
+from execlab.agentic_reports import build_debate_report as make_debate_report
+from execlab.agentic_reports import build_execution_playbook as make_playbook_report
 from execlab.analytics import build_historical_volume_curve as build_curve
 from execlab.analytics import build_market_eda as build_eda
 from execlab.causal import build_tca_causal_report as make_causal_report
 from execlab.config import Settings, load_settings
+from execlab.custom_algo import build_custom_algo_report as make_custom_algo_report
 from execlab.data import MarketDataClient, MarketDataError, select_window_bars, validate_market_session
 from execlab.schedules import (
     generate_is_schedule as make_is_schedule,
@@ -29,7 +33,13 @@ from execlab.pretrade import (
 from execlab.risk import build_beta_risk_report as make_beta_risk_report
 from execlab.risk import build_peer_stock_analysis as make_peer_report
 from execlab.schemas import (
+    AgentStepReport,
     BetaRiskReport,
+    CounterfactualReport,
+    CustomAlgoPlan,
+    CustomAlgoReport,
+    DebateReport,
+    ExecutionPlaybookReport,
     ExpectedCostModelReport,
     ExecutionMemo,
     ExecutionRequest,
@@ -60,10 +70,17 @@ class ToolRuntime:
     beta_risk_report: BetaRiskReport | None = None
     peer_report: PeerStockAnalysisReport | None = None
     causal_report: TcaCausalReport | None = None
+    debate_report: DebateReport | None = None
+    counterfactual_report: CounterfactualReport | None = None
+    playbook_report: ExecutionPlaybookReport | None = None
+    custom_schedule: pd.DataFrame = field(default_factory=pd.DataFrame)
+    custom_algo_plan: CustomAlgoPlan | None = None
+    custom_algo_report: CustomAlgoReport | None = None
     scenario_report: object | None = None
     provider: str = "unknown"
     warnings: list[str] = field(default_factory=list)
     state_delta: dict[str, object] = field(default_factory=dict)
+    agent_reports: dict[str, AgentStepReport] = field(default_factory=dict)
     adk_status: str = "not_attempted"
     adk_attempted: bool = False
     adk_error_summary: str | None = None
@@ -89,6 +106,10 @@ class ExecLabToolset:
             self.build_beta_risk_model,
             self.build_peer_stock_analysis,
             self.build_tca_causal_analysis,
+            self.build_debate_report,
+            self.build_counterfactual_report,
+            self.build_execution_playbook,
+            self.build_custom_algo,
             self.analyze_limit_feasibility,
             self.generate_twap_schedule,
             self.generate_vwap_schedule,
@@ -284,6 +305,98 @@ class ExecLabToolset:
         )
         return self.runtime.causal_report.model_dump()
 
+    def build_debate_report(self) -> dict:
+        self._ensure_pretrade()
+        self._ensure_beta_risk()
+        self._ensure_peers()
+        self._ensure_simulations()
+        if self.runtime.debate_report is None:
+            self.runtime.debate_report = make_debate_report(
+                request=self.runtime.request,
+                simulations=self.runtime.simulations,
+                schedules=self.runtime.schedules,
+                pretrade=self.runtime.pretrade_report,
+                beta_risk=self.runtime.beta_risk_report,
+                peer_report=self.runtime.peer_report,
+            )
+        _trace(
+            self.runtime,
+            "tool.build_debate_report",
+            details=f"judge={self.runtime.debate_report.judge_winner}, algo={self.runtime.debate_report.recommended_algo}",
+        )
+        return self.runtime.debate_report.model_dump()
+
+    def build_counterfactual_report(self) -> dict:
+        self._ensure_pretrade()
+        self._ensure_peers()
+        self._ensure_simulations()
+        if self.runtime.counterfactual_report is None:
+            self.runtime.counterfactual_report = make_counterfactual_report(
+                request=self.runtime.request,
+                simulations=self.runtime.simulations,
+                schedules=self.runtime.schedules,
+                pretrade=self.runtime.pretrade_report,
+                peer_report=self.runtime.peer_report,
+            )
+        _trace(
+            self.runtime,
+            "tool.build_counterfactual_report",
+            details=f"scenarios={len(self.runtime.counterfactual_report.scenarios)}",
+        )
+        return self.runtime.counterfactual_report.model_dump()
+
+    def build_execution_playbook(self) -> dict:
+        self._ensure_pretrade()
+        self._ensure_beta_risk()
+        self._ensure_peers()
+        self._ensure_debate()
+        self._ensure_counterfactuals()
+        if self.runtime.playbook_report is None:
+            self.runtime.playbook_report = make_playbook_report(
+                request=self.runtime.request,
+                debate=self.runtime.debate_report,
+                counterfactuals=self.runtime.counterfactual_report,
+                pretrade=self.runtime.pretrade_report,
+                beta_risk=self.runtime.beta_risk_report,
+                peer_report=self.runtime.peer_report,
+            )
+        _trace(
+            self.runtime,
+            "tool.build_execution_playbook",
+            details=f"algo={self.runtime.playbook_report.recommended_algo}",
+        )
+        return self.runtime.playbook_report.model_dump()
+
+    def build_custom_algo(self) -> dict:
+        self._ensure_eda()
+        self._ensure_pretrade()
+        self._ensure_beta_risk()
+        self._ensure_peers()
+        self._ensure_debate()
+        if self.runtime.custom_algo_report is None:
+            schedule, report = make_custom_algo_report(
+                request=self.runtime.request,
+                bars=self.runtime.window_bars,
+                volume_curve=self.runtime.volume_curve,
+                eda=self.runtime.eda,
+                pretrade=self.runtime.pretrade_report,
+                beta_risk=self.runtime.beta_risk_report,
+                peer_report=self.runtime.peer_report,
+                debate_report=self.runtime.debate_report,
+                custom_plan=self.runtime.custom_algo_plan,
+            )
+            self.runtime.custom_schedule = schedule
+            self.runtime.custom_algo_report = report
+        _trace(
+            self.runtime,
+            "tool.build_custom_algo",
+            details=(
+                f"{self.runtime.custom_algo_report.name}: "
+                f"{self.runtime.custom_algo_report.simulation.metrics.arrival_cost_bps:.2f}bps"
+            ),
+        )
+        return self.runtime.custom_algo_report.model_dump()
+
     def analyze_limit_feasibility(self) -> dict:
         self._ensure_simulations()
         limit = self.runtime.request.limit_price
@@ -395,6 +508,10 @@ class ExecLabToolset:
         self.run_cost_scenario_lab()
         if self.runtime.causal_report is None:
             self.build_tca_causal_analysis()
+        self._ensure_debate()
+        self._ensure_counterfactuals()
+        self._ensure_playbook()
+        self._ensure_custom_algo()
         metrics = self.calculate_tca_metrics()
         best_arrival = min(
             metrics.values(),
@@ -421,6 +538,18 @@ class ExecLabToolset:
             else {},
             "causal_report": self.runtime.causal_report.model_dump()
             if self.runtime.causal_report
+            else {},
+            "debate_report": self.runtime.debate_report.model_dump()
+            if self.runtime.debate_report
+            else {},
+            "counterfactual_report": self.runtime.counterfactual_report.model_dump()
+            if self.runtime.counterfactual_report
+            else {},
+            "playbook_report": self.runtime.playbook_report.model_dump()
+            if self.runtime.playbook_report
+            else {},
+            "custom_algo_report": self.runtime.custom_algo_report.model_dump()
+            if self.runtime.custom_algo_report
             else {},
             "best_algo_by_arrival_cost": best_arrival,
             "warnings": _dedupe(self.runtime.warnings),
@@ -463,6 +592,22 @@ class ExecLabToolset:
         self._ensure_beta_risk()
         if self.runtime.peer_report is None:
             self.build_peer_stock_analysis()
+
+    def _ensure_debate(self) -> None:
+        if self.runtime.debate_report is None:
+            self.build_debate_report()
+
+    def _ensure_counterfactuals(self) -> None:
+        if self.runtime.counterfactual_report is None:
+            self.build_counterfactual_report()
+
+    def _ensure_playbook(self) -> None:
+        if self.runtime.playbook_report is None:
+            self.build_execution_playbook()
+
+    def _ensure_custom_algo(self) -> None:
+        if self.runtime.custom_algo_report is None:
+            self.build_custom_algo()
 
     def _ensure_schedules(self) -> None:
         self._ensure_curve()
@@ -546,7 +691,7 @@ class ExecLabService:
             details=f"ticker={request.ticker}, date={request.trade_date}, adk_ready={adk_ready}",
         )
 
-        # Deterministic first pass guarantees the UI has complete, inspectable outputs.
+        # Tool pass guarantees the UI has complete, inspectable outputs before agent synthesis.
         toolset.fetch_intraday_bars()
         toolset.build_historical_volume_curve()
         toolset.build_market_eda()
@@ -562,6 +707,18 @@ class ExecLabService:
         toolset.calculate_tca_metrics()
         toolset.run_cost_scenario_lab()
         toolset.build_tca_causal_analysis()
+        toolset.build_debate_report()
+        toolset.build_counterfactual_report()
+        toolset.build_execution_playbook()
+        if request.custom_algo_instructions and adk_ready:
+            runtime.adk_attempted = True
+            self._run_custom_planner_with_candidates(runtime)
+        elif request.custom_algo_instructions and not adk_ready:
+            runtime.warnings.append(
+                "Custom algo chat brief was provided, but ADK/Vertex is unavailable. "
+                "The custom schedule used market context only; no deterministic brief parser was used."
+            )
+        toolset.build_custom_algo()
 
         memo: ExecutionMemo | None = None
         if self.settings.require_adk_success and not adk_ready:
@@ -569,20 +726,21 @@ class ExecLabService:
             runtime.adk_error_category = "config"
             runtime.adk_error_summary = (
                 "ADK/Vertex is required for the full agent memo but is unavailable locally. "
-                "Returning deterministic fallback memo."
+                "Returning tool-grounded fallback memo."
             )
             runtime.warnings.append(runtime.adk_error_summary)
             _trace(runtime, "run.adk_unavailable", status="warning", details=runtime.adk_error_summary)
         elif adk_ready:
             runtime.adk_attempted = True
             self._run_adk_with_candidates(runtime, toolset)
+            runtime.agent_reports = self._agent_reports_from_state(runtime.state_delta)
             memo = self._memo_from_state(runtime.state_delta)
 
         if memo is None:
             memo = self._fallback_memo(toolset.get_execution_summary())
             if runtime.adk_status == "not_attempted":
                 runtime.adk_status = "skipped"
-            _trace(runtime, "run.memo_fallback", details="deterministic memo generated")
+            _trace(runtime, "run.memo_fallback", details="tool-grounded memo generated")
         else:
             _trace(runtime, "run.memo_adk", details="ADK memo generated")
 
@@ -594,8 +752,12 @@ class ExecLabService:
             or runtime.beta_risk_report is None
             or runtime.peer_report is None
             or runtime.causal_report is None
+            or runtime.debate_report is None
+            or runtime.counterfactual_report is None
+            or runtime.playbook_report is None
+            or runtime.custom_algo_report is None
         ):
-            raise RuntimeError("Backtest failed to produce required deterministic outputs.")
+            raise RuntimeError("Backtest failed to produce required tool outputs.")
 
         return RunResult(
             request=request,
@@ -610,8 +772,14 @@ class ExecLabService:
             beta_risk_report=runtime.beta_risk_report,
             peer_report=runtime.peer_report,
             causal_report=runtime.causal_report,
+            debate_report=runtime.debate_report,
+            counterfactual_report=runtime.counterfactual_report,
+            playbook_report=runtime.playbook_report,
+            custom_schedule=runtime.custom_schedule,
+            custom_algo_report=runtime.custom_algo_report,
             scenario_report=runtime.scenario_report,
             memo=memo,
+            agent_reports=runtime.agent_reports,
             warnings=_dedupe(runtime.warnings),
             adk_status=runtime.adk_status,
             adk_attempted=runtime.adk_attempted,
@@ -655,7 +823,106 @@ class ExecLabService:
 
         runtime.adk_status = "adk_error_fallback"
         runtime.adk_error_summary = runtime.adk_error_summary or str(last_exc or "Unknown ADK failure")
-        runtime.warnings.append(f"ADK memo failed; deterministic memo returned. Detail: {runtime.adk_error_summary}")
+        runtime.warnings.append(f"ADK memo failed; tool-grounded memo returned. Detail: {runtime.adk_error_summary}")
+
+    def _run_custom_planner_with_candidates(self, runtime: ToolRuntime) -> None:
+        os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+        os.environ.setdefault("GOOGLE_CLOUD_LOCATION", self.settings.gcp_region)
+        if self.settings.gcp_project:
+            os.environ.setdefault("GOOGLE_CLOUD_PROJECT", self.settings.gcp_project)
+
+        candidates = [self._last_successful_model or self.settings.vertex_model]
+        for candidate in self.settings.vertex_model_candidates:
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+        last_exc: Exception | None = None
+        for model_name in candidates:
+            try:
+                state = self._run_custom_planner_once(runtime, model_name=model_name)
+                plan = self._custom_plan_from_state(state)
+                if plan is not None:
+                    runtime.custom_algo_plan = plan
+                    runtime.adk_model_used = model_name
+                    self._last_successful_model = model_name
+                    _trace(
+                        runtime,
+                        "run.custom_algo_planner",
+                        details=f"status={plan.status}, style={plan.style_hint}",
+                    )
+                    return
+            except Exception as exc:  # pragma: no cover - network/credentials dependent
+                last_exc = exc
+                runtime.adk_error_summary = _flatten_exception_messages(exc)
+                runtime.adk_error_category = _classify_adk_error(runtime.adk_error_summary)
+                _trace(
+                    runtime,
+                    "run.custom_algo_planner_failed",
+                    status="error",
+                    details=f"{model_name}: {runtime.adk_error_category}",
+                )
+                if runtime.adk_error_category in {"network", "rate_limit"}:
+                    break
+
+        detail = runtime.adk_error_summary or str(last_exc or "Unknown custom planner failure")
+        runtime.warnings.append(
+            "CustomAlgoPlannerAgent failed; custom chat brief was not interpreted. "
+            f"Detail: {detail}"
+        )
+
+    def _run_custom_planner_once(self, runtime: ToolRuntime, model_name: str) -> dict[str, object]:
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+        from google.genai.types import Content, Part
+
+        agent = create_custom_algo_planner_agent(self.settings, model_name=model_name)
+        session_service = InMemorySessionService()
+        runner = Runner(agent=agent, app_name=self.settings.app_name, session_service=session_service)
+        session_id = f"custom-planner-{uuid4().hex[:8]}"
+        planner_context = self._build_custom_planner_context(runtime)
+
+        async def _drive() -> dict[str, object]:
+            await session_service.create_session(
+                app_name=self.settings.app_name,
+                user_id=runtime.request.user_id,
+                session_id=session_id,
+                state={
+                    "request": runtime.request.model_dump(mode="json"),
+                    "custom_planner_context": planner_context,
+                },
+            )
+            message = Content(
+                role="user",
+                parts=[
+                    Part(
+                        text=(
+                            "Create a CustomAlgoPlan from the user's desk brief and the "
+                            "custom_planner_context. Return only the structured schema."
+                        )
+                    )
+                ],
+            )
+            captured: dict[str, object] = {}
+            async for event in runner.run_async(
+                user_id=runtime.request.user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                actions = getattr(event, "actions", None)
+                delta = getattr(actions, "state_delta", None) if actions else None
+                if isinstance(delta, dict):
+                    captured.update(delta)
+            session = await session_service.get_session(
+                app_name=self.settings.app_name,
+                user_id=runtime.request.user_id,
+                session_id=session_id,
+            )
+            if hasattr(session, "state") and isinstance(session.state, dict):
+                captured.update(session.state)
+            return captured
+
+        planner_timeout = min(max(self.settings.adk_timeout_seconds / 2.0, 60.0), 180.0)
+        return asyncio.run(asyncio.wait_for(_drive(), timeout=planner_timeout))
 
     def _run_adk_once(self, runtime: ToolRuntime, toolset: ExecLabToolset, model_name: str) -> None:
         from google.adk.runners import Runner
@@ -709,7 +976,54 @@ class ExecLabService:
                 captured.update(session.state)
             return captured
 
-        runtime.state_delta = asyncio.run(asyncio.wait_for(_drive(), timeout=90.0))
+        runtime.state_delta = asyncio.run(
+            asyncio.wait_for(_drive(), timeout=self.settings.adk_timeout_seconds)
+        )
+
+    @staticmethod
+    def _build_custom_planner_context(runtime: ToolRuntime) -> dict[str, object]:
+        metrics = {
+            algo: sim.metrics.model_dump(mode="json")
+            for algo, sim in sorted(runtime.simulations.items())
+        }
+        schedule_summaries = {
+            algo: sim.schedule_summary.model_dump(mode="json")
+            for algo, sim in sorted(runtime.simulations.items())
+        }
+        return {
+            "request": runtime.request.model_dump(mode="json"),
+            "user_desk_brief": runtime.request.custom_algo_instructions,
+            "market": runtime.eda.model_dump(mode="json") if runtime.eda else {},
+            "pretrade": runtime.pretrade_report.model_dump(mode="json")
+            if runtime.pretrade_report
+            else {},
+            "expected_cost_model": runtime.expected_cost_report.model_dump(mode="json")
+            if runtime.expected_cost_report
+            else {},
+            "beta_risk": runtime.beta_risk_report.model_dump(mode="json")
+            if runtime.beta_risk_report
+            else {},
+            "peer_analysis": runtime.peer_report.model_dump(mode="json")
+            if runtime.peer_report
+            else {},
+            "causal_tca": runtime.causal_report.model_dump(mode="json")
+            if runtime.causal_report
+            else {},
+            "agent_debate": runtime.debate_report.model_dump(mode="json")
+            if runtime.debate_report
+            else {},
+            "execution_playbook": runtime.playbook_report.model_dump(mode="json")
+            if runtime.playbook_report
+            else {},
+            "algo_metrics": metrics,
+            "schedule_summaries": schedule_summaries,
+            "warnings": _dedupe(runtime.warnings)[:8],
+            "planner_instruction": (
+                "Infer the user's custom execution constraints. Prefer asking follow-up questions "
+                "only when the brief is impossible to translate into a safe educational plan. "
+                "Do not invent numbers; use null when the user did not specify a hard cap or deadline."
+            ),
+        }
 
     @staticmethod
     def _build_agent_execution_context(runtime: ToolRuntime, toolset: ExecLabToolset) -> dict[str, object]:
@@ -719,6 +1033,10 @@ class ExecLabService:
         beta_risk = summary.get("beta_risk_report", {}) if isinstance(summary, dict) else {}
         peer = summary.get("peer_report", {}) if isinstance(summary, dict) else {}
         causal = summary.get("causal_report", {}) if isinstance(summary, dict) else {}
+        debate = summary.get("debate_report", {}) if isinstance(summary, dict) else {}
+        counterfactual = summary.get("counterfactual_report", {}) if isinstance(summary, dict) else {}
+        playbook = summary.get("playbook_report", {}) if isinstance(summary, dict) else {}
+        custom = summary.get("custom_algo_report", {}) if isinstance(summary, dict) else {}
         scenario = summary.get("scenario_report", {}) if isinstance(summary, dict) else {}
         metrics = summary.get("metrics", {}) if isinstance(summary, dict) else {}
         eda = summary.get("eda", {}) if isinstance(summary, dict) else {}
@@ -795,6 +1113,48 @@ class ExecLabService:
                 "bullets": causal.get("bullets", [])[:6] if isinstance(causal, dict) else [],
                 "caveats": causal.get("caveats", [])[:4] if isinstance(causal, dict) else [],
             },
+            "agent_debate": {
+                "fast_case": debate.get("fast_case"),
+                "liquidity_case": debate.get("liquidity_case"),
+                "judge_winner": debate.get("judge_winner"),
+                "recommended_algo": debate.get("recommended_algo"),
+                "confidence": debate.get("confidence"),
+                "deciding_factors": debate.get("deciding_factors", [])[:5] if isinstance(debate, dict) else [],
+                "judge_rationale": debate.get("judge_rationale"),
+            },
+            "counterfactuals": {
+                "base_winner": counterfactual.get("base_winner"),
+                "summary": counterfactual.get("summary"),
+                "scenarios": counterfactual.get("scenarios", [])[:6] if isinstance(counterfactual, dict) else [],
+            },
+            "execution_playbook": {
+                "recommended_algo": playbook.get("recommended_algo"),
+                "urgency": playbook.get("urgency"),
+                "participation_guidance": playbook.get("participation_guidance"),
+                "limit_guidance": playbook.get("limit_guidance"),
+                "monitoring_triggers": playbook.get("monitoring_triggers", [])[:5] if isinstance(playbook, dict) else [],
+                "switch_rules": playbook.get("switch_rules", [])[:5] if isinstance(playbook, dict) else [],
+                "rationale": playbook.get("rationale"),
+            },
+            "custom_algo": {
+                "name": custom.get("name"),
+                "style": custom.get("style"),
+                "description": custom.get("description"),
+                "components": custom.get("components", [])[:6] if isinstance(custom, dict) else [],
+                "parameters": custom.get("parameters", {}) if isinstance(custom, dict) else {},
+                "rationale": custom.get("rationale", [])[:6] if isinstance(custom, dict) else [],
+                "metrics": (
+                    custom.get("simulation", {}).get("metrics", {})
+                    if isinstance(custom.get("simulation", {}), dict)
+                    else {}
+                )
+                if isinstance(custom, dict)
+                else {},
+                "caveats": custom.get("caveats", [])[:4] if isinstance(custom, dict) else [],
+            },
+            "custom_algo_agent_plan": runtime.custom_algo_plan.model_dump(mode="json")
+            if runtime.custom_algo_plan
+            else {},
             "algo_metrics": metrics,
             "schedule_summaries": {
                 algo: sim.schedule_summary.model_dump(mode="json")
@@ -810,6 +1170,18 @@ class ExecLabService:
         }
 
     @staticmethod
+    def _custom_plan_from_state(state: dict[str, object]) -> CustomAlgoPlan | None:
+        payload = state.get("custom_algo_plan")
+        if isinstance(payload, CustomAlgoPlan):
+            return payload
+        if isinstance(payload, dict):
+            try:
+                return CustomAlgoPlan.model_validate(payload)
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
     def _memo_from_state(state: dict[str, object]) -> ExecutionMemo | None:
         payload = state.get("execution_memo") or state.get("execution_memo_draft")
         if isinstance(payload, ExecutionMemo):
@@ -820,6 +1192,41 @@ class ExecLabService:
             except Exception:
                 return None
         return None
+
+    @staticmethod
+    def _agent_reports_from_state(state: dict[str, object]) -> dict[str, AgentStepReport]:
+        report_keys = [
+            "market_data_report",
+            "volume_curve_report",
+            "pretrade_report_agent",
+            "expected_cost_report_agent",
+            "historical_regression_report",
+            "beta_risk_report_agent",
+            "peer_cluster_report_agent",
+            "strategy_report",
+            "simulation_report",
+            "tca_report",
+            "cause_effect_report",
+            "fast_execution_argument",
+            "liquidity_seeking_argument",
+            "debate_judge_report",
+            "counterfactual_report_agent",
+            "playbook_report_agent",
+            "custom_algo_designer_report",
+            "tab_insight_report_agent",
+            "limit_feasibility_report",
+        ]
+        reports: dict[str, AgentStepReport] = {}
+        for key in report_keys:
+            payload = state.get(key)
+            if isinstance(payload, AgentStepReport):
+                reports[key] = payload
+            elif isinstance(payload, dict):
+                try:
+                    reports[key] = AgentStepReport.model_validate(payload)
+                except Exception:
+                    continue
+        return reports
 
     @staticmethod
     def _fallback_memo(summary: dict) -> ExecutionMemo:
@@ -882,6 +1289,24 @@ class ExecLabService:
                 f"{peer['median_peer_move_bps']:.2f} bps, recommendation: "
                 f"{peer['urgency_recommendation']}."
             )
+        debate = summary.get("debate_report", {})
+        if isinstance(debate, dict) and debate.get("recommended_algo"):
+            evidence.append(
+                f"Agent debate: {debate['judge_winner']} won with {debate['confidence']:.0%} "
+                f"confidence; recommended algo {debate['recommended_algo']}."
+            )
+        custom = summary.get("custom_algo_report", {})
+        if isinstance(custom, dict) and custom.get("simulation"):
+            custom_metrics = custom["simulation"].get("metrics", {})
+            if isinstance(custom_metrics, dict):
+                evidence.append(
+                    f"Custom algo designer: {custom.get('name')} ({custom.get('style')}) "
+                    f"modeled at {custom_metrics.get('arrival_cost_bps', 0):.2f} bps arrival cost "
+                    f"with {custom_metrics.get('completion_rate', 0) * 100:.1f}% completion."
+                )
+        counterfactual = summary.get("counterfactual_report", {})
+        if isinstance(counterfactual, dict) and counterfactual.get("summary"):
+            evidence.append(f"Counterfactual robustness: {counterfactual['summary']}")
         causal = summary.get("causal_report", {})
         if isinstance(causal, dict):
             for bullet in causal.get("bullets", [])[:3]:

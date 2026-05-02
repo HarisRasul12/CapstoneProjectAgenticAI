@@ -26,6 +26,7 @@ def main() -> None:
         adk_enabled=False,
         require_adk_success=False,
         allow_transient_fallback=True,
+        adk_timeout_seconds=300,
         data_provider="yfinance",
         yfinance_timeout_seconds=5,
         historical_curve_lookback_days=3,
@@ -90,6 +91,11 @@ def evaluate_case(case: dict, result) -> tuple[bool, str]:
     checks.append((bool(result.beta_risk_report.index_comparison), "beta_risk:index_intraday"))
     checks.append((result.peer_report.analyzed_count > 0, "peer_cluster:analyzed"))
     checks.append((bool(result.causal_report.bullets), "causal_tca:bullets"))
+    checks.append((bool(result.debate_report.recommended_algo), "debate:recommendation"))
+    checks.append((len(result.counterfactual_report.scenarios) >= 5, "counterfactuals:scenarios"))
+    checks.append((bool(result.playbook_report.switch_rules), "playbook:switch_rules"))
+    checks.append((bool(result.custom_algo_report.components), "custom_algo:components"))
+    checks.append((result.custom_algo_report.simulation.metrics.total_quantity_targeted == result.request.quantity, "custom_algo:simulation"))
     checks.append(
         (
             any("Spread uses a high-low proxy" in caveat for caveat in result.expected_cost_report.caveats),
