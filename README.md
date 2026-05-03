@@ -20,12 +20,12 @@ Deployment target: Cloud Run service `execlab-ai`.
 Verified deployment:
 - project: `ieor-4576-agents-haris`
 - region: `us-central1`
-- latest verified revision: `execlab-ai-00008-m79`
+- latest verified revision: `execlab-ai-00009-425`
 - public URL smoke test: HTTP `200`
 - online planner ADK/Vertex smoke test: Cloud Run Job `execlab-ai-adk-smoke-xjccp` completed successfully
-- online full multi-agent ADK/Vertex smoke test: Cloud Run Job execution `execlab-ai-full-adk-smoke-ggt8g` completed successfully
+- online full multi-agent ADK/Vertex smoke test: Cloud Run Job execution `execlab-ai-full-adk-smoke-r4fsk` completed successfully
 - ADK smoke result: `ADK_SMOKE_OK {"completion_target_pct": 0.5, "completion_target_time": "11:00", "max_participation_rate": 0.1, "status": "ok", "style_hint": "adaptive_vwap"}`
-- full ADK smoke result: `ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_narrative_count": 13, "agent_report_count": 19, "best_algo": "POV", "custom_algo_story": true, "model": "gemini-2.5-flash-lite", "runtime_seconds": 54.599}`
+- full ADK smoke result: `ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_narrative_count": 13, "agent_report_count": 19, "best_algo": "POV", "custom_algo_story": true, "model": "gemini-2.5-flash-lite", "runtime_seconds": 55.582}`
 
 ## Capstone Requirements Checklist
 | Requirement | How ExecLab AI satisfies it | Evidence |
@@ -143,7 +143,7 @@ The project includes two levels of ADK smoke tests:
 The latest deployed full smoke returned:
 
 ```text
-ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_narrative_count": 13, "agent_report_count": 19, "best_algo": "POV", "custom_algo_story": true, "model": "gemini-2.5-flash-lite", "runtime_seconds": 54.599}
+ADK_FULL_SMOKE_OK {"adk_status": "success", "agent_narrative_count": 13, "agent_report_count": 19, "best_algo": "POV", "custom_algo_story": true, "model": "gemini-2.5-flash-lite", "runtime_seconds": 55.582}
 ```
 
 ## What The App Does

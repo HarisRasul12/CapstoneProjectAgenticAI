@@ -73,8 +73,9 @@ def build_tca_causal_report(
                 driver="Participation constraint",
                 affected_algos=["POV"],
                 evidence=(
-                    f"POV max participation was {pov.metrics.max_participation_rate * 100:.2f}% "
-                    f"with {pov.metrics.unfilled_quantity:,} unfilled shares and "
+                    f"POV requested cap was {request.participation_rate * 100:.2f}%; realized max "
+                    f"participation was {pov.metrics.max_participation_rate * 100:.2f}% with "
+                    f"{pov.metrics.unfilled_quantity:,} unfilled shares and "
                     f"{pov.metrics.cap_violation_count} cap violations."
                 ),
                 implication=implication,

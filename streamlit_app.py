@@ -382,7 +382,11 @@ def render_result(result) -> None:
             for warning in result.warnings:
                 st.warning(warning)
 
-    metric_rows = [sim.metrics.model_dump() for sim in result.simulations.values()]
+    metric_rows = []
+    for sim in result.simulations.values():
+        row = sim.metrics.model_dump()
+        row["requested_cap_rate"] = _algo_requested_cap_rate(result, sim.algo)
+        metric_rows.append(row)
     metrics_df = pd.DataFrame(metric_rows).sort_values("arrival_cost_bps")
 
     best = metrics_df.iloc[0]
@@ -473,6 +477,7 @@ def render_result(result) -> None:
                 "total_quantity_executed",
                 "unfilled_quantity",
                 "completion_rate",
+                "requested_cap_rate",
                 "max_participation_rate",
                 "cap_violation_count",
             ]
@@ -486,12 +491,19 @@ def render_result(result) -> None:
                 "total_quantity_executed": "Shares",
                 "unfilled_quantity": "Unfilled",
                 "completion_rate": "Completion",
-                "max_participation_rate": "Max Participation",
+                "requested_cap_rate": "Requested Cap",
+                "max_participation_rate": "Realized Max Participation",
                 "cap_violation_count": "Cap Violations",
             }
         )
-        display["Max Participation"] = display["Max Participation"] * 100
+        display["Requested Cap"] = display["Requested Cap"] * 100
+        display["Realized Max Participation"] = display["Realized Max Participation"] * 100
         display["Completion"] = display["Completion"] * 100
+        st.caption(
+            f"Participation cap is the ceiling. Realized max participation is what actually traded "
+            f"in the largest bar. A {result.request.participation_rate:.0%} POV can show a much "
+            "smaller realized max when the order is small relative to displayed volume."
+        )
         st.dataframe(
             display,
             use_container_width=True,
@@ -502,7 +514,8 @@ def render_result(result) -> None:
                 "VWAP Slip bps": st.column_config.NumberColumn(format="%.2f"),
                 "Close Slip bps": st.column_config.NumberColumn(format="%.2f"),
                 "Completion": st.column_config.NumberColumn(format="%.2f%%"),
-                "Max Participation": st.column_config.NumberColumn(format="%.2f%%"),
+                "Requested Cap": st.column_config.NumberColumn(format="%.2f%%"),
+                "Realized Max Participation": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
         st.subheader("Market EDA")
@@ -973,6 +986,10 @@ def render_custom_algo(result) -> None:
     with c2:
         st.subheader("Custom vs benchmark TCA")
         compare = _custom_comparison_table(result)
+        st.caption(
+            "Requested Cap % is the configured ceiling; Realized Max Participation % is the highest "
+            "actual child-order participation observed in any bar. Realized can be far below the cap."
+        )
         st.dataframe(
             compare,
             use_container_width=True,
@@ -981,7 +998,8 @@ def render_custom_algo(result) -> None:
                 "Arrival Cost bps": st.column_config.NumberColumn(format="%.2f"),
                 "VWAP Slip bps": st.column_config.NumberColumn(format="%.2f"),
                 "Completion %": st.column_config.NumberColumn(format="%.1f%%"),
-                "Max Participation %": st.column_config.NumberColumn(format="%.2f%%"),
+                "Requested Cap %": st.column_config.NumberColumn(format="%.2f%%"),
+                "Realized Max Participation %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
 
@@ -1157,6 +1175,7 @@ def _custom_comparison_table(result) -> pd.DataFrame:
     rows = []
     for algo, sim in all_simulations(result).items():
         metrics = sim.metrics
+        requested_cap_rate = _algo_requested_cap_rate(result, algo)
         rows.append(
             {
                 "Algo": algo,
@@ -1164,10 +1183,22 @@ def _custom_comparison_table(result) -> pd.DataFrame:
                 "VWAP Slip bps": metrics.vwap_slippage_bps,
                 "Completion %": metrics.completion_rate * 100,
                 "Unfilled": metrics.unfilled_quantity,
-                "Max Participation %": metrics.max_participation_rate * 100,
+                "Requested Cap %": requested_cap_rate * 100 if requested_cap_rate is not None else None,
+                "Realized Max Participation %": metrics.max_participation_rate * 100,
             }
         )
     return pd.DataFrame(rows).sort_values("Arrival Cost bps")
+
+
+def _algo_requested_cap_rate(result, algo: str) -> float | None:
+    normalized = str(algo).upper()
+    if normalized == "POV":
+        return float(result.request.participation_rate)
+    if normalized == "CUSTOM":
+        cap = getattr(result.custom_algo_report, "parameters", {}).get("adaptive_participation_cap")
+        if cap is not None:
+            return float(cap)
+    return None
 
 
 def pretrade_commentary_table(result) -> pd.DataFrame:
@@ -1252,8 +1283,8 @@ def tca_commentary_table(result) -> pd.DataFrame:
                 "What it means": "Shows whether strict POV caps or limit prices left shares behind. An algo with great bps but poor completion may not be usable.",
             },
             {
-                "Stat": "Max participation",
-                "What it means": "Peak child-order size divided by bar volume. This is the clearest impact-pressure diagnostic in the bar simulator.",
+                "Stat": "Requested cap vs realized participation",
+                "What it means": "Requested cap is the ceiling such as 10% POV. Realized max participation is peak child-order size divided by bar volume, and can be much lower when the order is small versus liquidity.",
             },
         ]
     )
